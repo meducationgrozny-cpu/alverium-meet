@@ -1,22 +1,31 @@
 "use client";
 
+import { useState, useEffect } from 'react';
 import '@livekit/components-styles';
-import {
-  LiveKitRoom,
-  VideoConference,
-  RoomAudioRenderer,
-} from '@livekit/components-react';
+import { LiveKitRoom, VideoConference, RoomAudioRenderer } from '@livekit/components-react';
 
 export default function Home() {
-  // Наш боевой сервер LiveKit
+  const [token, setToken] = useState("");
   const roomUrl = "wss://meet.alverium.ru";
-  
-  // ВРЕМЕННЫЙ ТОКЕН: Сюда нужно будет вставить длинный токен (eyJ...), 
-  // который мы генерировали на сервере. Позже этот токен будет выдавать Django.
-  const token = "ВСТАВЬ_СВОЙ_ТЕСТОВЫЙ_ТОКЕН_СЮДА";
 
-  if (token === "ВСТАВЬ_СВОЙ_ТЕСТОВЫЙ_ТОКЕН_СЮДА") {
-    return <div className="text-white p-10">Пожалуйста, вставьте тестовый токен в код.</div>;
+  useEffect(() => {
+    // При заходе на сайт автоматически стучимся в наш API за токеном
+    const fetchToken = async () => {
+      try {
+        const response = await fetch('/api/token');
+        const data = await response.json();
+        setToken(data.token);
+      } catch (e) {
+        console.error("Ошибка при получении токена:", e);
+      }
+    };
+    
+    fetchToken();
+  }, []);
+
+  // Пока токен не получен, показываем экран загрузки
+  if (!token) {
+    return <div className="text-white flex items-center justify-center h-screen bg-black">Выписываем пропуск в комнату...</div>;
   }
 
   return (
@@ -26,13 +35,10 @@ export default function Home() {
         audio={true}
         token={token}
         serverUrl={roomUrl}
-        // data-lk-theme применяет красивые стили по умолчанию
         data-lk-theme="default" 
         style={{ height: '100vh', width: '100vw' }}
       >
-        {/* Компонент, который сам рисует сетку видео, кнопки микрофона, камеры и т.д. */}
         <VideoConference />
-        {/* Компонент для воспроизведения звука комнаты */}
         <RoomAudioRenderer />
       </LiveKitRoom>
     </main>
