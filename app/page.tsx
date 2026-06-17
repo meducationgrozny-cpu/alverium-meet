@@ -15,7 +15,7 @@ import {
 import { Track } from 'livekit-client';
 
 // ----------------------------------------------------
-// ЧАТ
+// ЧАТ (Без изменений)
 // ----------------------------------------------------
 function AlveriumChat() {
   const { send, chatMessages, isSending } = useChat();
@@ -79,7 +79,7 @@ function AlveriumStage() {
   return (
     <div className="flex flex-col h-screen bg-[#0a0a0a] text-white font-sans">
       
-      {/* 1. Шапка (стала более компактной и темной) */}
+      {/* 1. Шапка */}
       <header className="flex items-center justify-between px-6 py-3 bg-[#111] border-b border-gray-900">
         <div className="flex items-center gap-3">
           <div className="w-7 h-7 bg-red-600 rounded-md flex items-center justify-center font-bold text-white text-sm">A</div>
@@ -91,7 +91,7 @@ function AlveriumStage() {
         </div>
       </header>
 
-      {/* 2. Центральная часть (Видео + Чат) */}
+      {/* 2. Центральная часть */}
       <main className="flex-1 flex overflow-hidden relative">
         <div className="flex-1 p-2">
           <GridLayout tracks={tracks} style={{ height: '100%' }}>
@@ -101,30 +101,35 @@ function AlveriumStage() {
         <AlveriumChat />
       </main>
 
-      {/* 3. Нижняя панель в стиле ZOOM */}
-      <footer className="bg-[#111] p-3 flex justify-between items-center z-10 border-t border-gray-900 px-6">
+      {/* 3. Нижняя панель в стиле ZOOM (Премиум версия) */}
+      <footer className="bg-[#111] p-3 flex justify-between items-center z-10 border-t border-gray-900 px-6 h-20">
         
         {/* Левый блок: Настройки и Запись */}
-        <div className="flex gap-1 w-1/3">
+        <div className="flex gap-2 w-1/3">
+          {/* Кнопка настроек */}
           <button 
-            onClick={() => alert('Настройки камеры и микрофона (в разработке)')}
-            className="flex flex-col items-center justify-center w-14 h-12 rounded-lg hover:bg-gray-800 text-gray-400 hover:text-white transition"
+            onClick={() => alert('Настройки (в разработке)')}
+            className="flex flex-col items-center justify-center w-16 h-14 rounded-xl hover:bg-gray-800 text-gray-400 hover:text-white transition-all duration-300 group"
           >
-            <span className="text-lg">⚙️</span>
-            <span className="text-[10px] mt-0.5">Настройки</span>
+            <span className="text-2xl group-hover:rotate-90 transition-transform duration-500">⚙️</span>
+            <span className="text-[10px] mt-1 font-medium tracking-tight">Настройки</span>
           </button>
           
+          {/* НОВАЯ ПРЕМИУМ КНОПКА ЗАПИСИ */}
           <button 
-            onClick={() => alert('Запись урока начнется (в разработке)')}
-            className="flex flex-col items-center justify-center w-14 h-12 rounded-lg hover:bg-gray-800 text-gray-400 hover:text-white transition"
+            onClick={() => alert('Запись (в разработке)')}
+            className="group flex flex-col items-center justify-center w-16 h-14 rounded-xl transition-all duration-300 hover:bg-[#1a0f0f] border border-transparent hover:border-red-900/50"
           >
-            <span className="text-lg">⏺️</span>
-            <span className="text-[10px] mt-0.5">Запись</span>
+            {/* Стилизованный символ записи (Кольцо + Круг) */}
+            <div className="relative flex items-center justify-center w-6 h-6 border-2 border-gray-600 rounded-full group-hover:border-red-700 transition-colors duration-300">
+              <div className="w-3 h-3 bg-red-800 rounded-full group-hover:bg-red-600 transition-colors duration-300 group-hover:scale-110 transform"></div>
+            </div>
+            <span className="text-[10px] mt-1 font-medium tracking-tight text-gray-400 group-hover:text-red-300 transition-colors">Запись</span>
           </button>
         </div>
 
         {/* Центральный блок: Основные инструменты */}
-        <div className="flex items-center gap-2 bg-[#222] px-4 py-1.5 rounded-2xl border border-gray-800">
+        <div className="flex items-center gap-2 bg-[#181818] px-4 py-2 rounded-2xl border border-gray-800 shadow-inner">
           <TrackToggle source={Track.Source.Microphone} className="!bg-transparent hover:!bg-gray-700 !text-white !border-none !rounded-xl transition-all" />
           <TrackToggle source={Track.Source.Camera} className="!bg-transparent hover:!bg-gray-700 !text-white !border-none !rounded-xl transition-all" />
           <TrackToggle source={Track.Source.ScreenShare} className="!bg-transparent hover:!bg-gray-700 !text-white !border-none !rounded-xl transition-all" />
@@ -132,7 +137,7 @@ function AlveriumStage() {
           <div className="w-px h-8 bg-gray-700 mx-1"></div> {/* Разделитель */}
 
           <button 
-            onClick={() => alert('Модуль загрузки PDF и презентаций (в разработке)')}
+            onClick={() => alert('Файлы (в разработке)')}
             className="flex flex-col items-center justify-center w-12 h-10 bg-transparent hover:bg-gray-700 text-white rounded-xl transition"
             title="Загрузить материалы"
           >
@@ -142,7 +147,7 @@ function AlveriumStage() {
 
         {/* Правый блок: Выход */}
         <div className="flex justify-end w-1/3">
-          <DisconnectButton className="!bg-red-600 hover:!bg-red-500 !text-white px-5 py-2.5 !rounded-xl text-sm font-bold tracking-wide transition-all">
+          <DisconnectButton className="!bg-red-600 hover:!bg-red-500 !text-white px-5 py-2.5 !rounded-xl text-sm font-bold tracking-wide transition-all shadow-lg shadow-red-900/30">
             Завершить
           </DisconnectButton>
         </div>
@@ -154,7 +159,7 @@ function AlveriumStage() {
 }
 
 // ----------------------------------------------------
-// КОРНЕВОЙ КОМПОНЕНТ
+// КОРНЕВОЙ КОМПОНЕНТ (Без изменений)
 // ----------------------------------------------------
 export default function Home() {
   const [token, setToken] = useState("");
