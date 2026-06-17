@@ -10,12 +10,12 @@ import {
   useTracks,
   TrackToggle,
   DisconnectButton,
-  useChat // <-- Добавили хук для создания своего чата
+  useChat
 } from '@livekit/components-react';
 import { Track } from 'livekit-client';
 
 // ----------------------------------------------------
-// НОВЫЙ КОМПОНЕНТ: Наш фирменный текстовый чат
+// ЧАТ
 // ----------------------------------------------------
 function AlveriumChat() {
   const { send, chatMessages, isSending } = useChat();
@@ -24,19 +24,16 @@ function AlveriumChat() {
   const handleSend = (e: React.FormEvent) => {
     e.preventDefault();
     if (message.trim()) {
-      send(message); // Отправляем сообщение на сервер
-      setMessage(""); // Очищаем поле ввода
+      send(message);
+      setMessage("");
     }
   };
 
   return (
     <div className="flex flex-col h-full bg-[#161616] border-l border-gray-800 w-80 shrink-0">
-      {/* Шапка чата */}
       <div className="p-4 border-b border-gray-800">
         <h2 className="text-sm font-bold text-gray-400 uppercase tracking-wider">Чат класса</h2>
       </div>
-      
-      {/* Список сообщений */}
       <div className="flex-1 overflow-y-auto p-4 space-y-4">
         {chatMessages.length === 0 ? (
           <div className="text-gray-600 text-xs text-center mt-4">Пока нет сообщений...</div>
@@ -51,8 +48,6 @@ function AlveriumChat() {
           ))
         )}
       </div>
-
-      {/* Поле ввода */}
       <form onSubmit={handleSend} className="p-4 border-t border-gray-800 flex gap-2">
         <input 
           type="text" 
@@ -61,12 +56,8 @@ function AlveriumChat() {
           placeholder="Сообщение..." 
           className="flex-1 bg-[#222] text-white text-sm px-4 py-2 rounded-lg border border-gray-700 focus:outline-none focus:border-red-500 transition-colors"
         />
-        <button 
-          type="submit" 
-          disabled={isSending || !message.trim()}
-          className="bg-red-600 hover:bg-red-500 text-white px-4 py-2 rounded-lg text-sm font-bold transition-colors disabled:opacity-50"
-        >
-          Отправить
+        <button type="submit" disabled={isSending || !message.trim()} className="bg-red-600 hover:bg-red-500 text-white px-4 py-2 rounded-lg text-sm font-bold transition-colors disabled:opacity-50">
+          ➤
         </button>
       </form>
     </div>
@@ -86,45 +77,76 @@ function AlveriumStage() {
   );
 
   return (
-    <div className="flex flex-col h-screen bg-[#111111] text-white font-sans">
+    <div className="flex flex-col h-screen bg-[#0a0a0a] text-white font-sans">
       
-      {/* 1. Шапка */}
-      <header className="flex items-center justify-between px-6 py-4 bg-[#1a1a1a] border-b border-red-600">
+      {/* 1. Шапка (стала более компактной и темной) */}
+      <header className="flex items-center justify-between px-6 py-3 bg-[#111] border-b border-gray-900">
         <div className="flex items-center gap-3">
-          <div className="w-8 h-8 bg-red-600 rounded-md flex items-center justify-center font-bold text-white">A</div>
-          <h1 className="text-lg font-semibold tracking-wide">Alverium Meet</h1>
+          <div className="w-7 h-7 bg-red-600 rounded-md flex items-center justify-center font-bold text-white text-sm">A</div>
+          <h1 className="text-base font-semibold text-gray-200">Alverium Meet</h1>
         </div>
-        <div className="flex items-center gap-2">
+        <div className="flex items-center gap-2 bg-gray-900 px-3 py-1 rounded-full">
           <div className="w-2 h-2 rounded-full bg-red-500 animate-pulse"></div>
-          <span className="text-sm text-gray-300">Урок идет</span>
+          <span className="text-xs text-gray-300 font-medium">Урок идет</span>
         </div>
       </header>
 
-      {/* 2. Центральная часть: Видео (слева) + Чат (справа) */}
+      {/* 2. Центральная часть (Видео + Чат) */}
       <main className="flex-1 flex overflow-hidden relative">
-        
-        {/* Зона видео */}
-        <div className="flex-1 p-4">
+        <div className="flex-1 p-2">
           <GridLayout tracks={tracks} style={{ height: '100%' }}>
             <ParticipantTile />
           </GridLayout>
         </div>
-        
-        {/* Зона чата (Встроили наш новый компонент) */}
         <AlveriumChat />
-
       </main>
 
-      {/* 3. Нижняя панель управления */}
-      <footer className="bg-[#1a1a1a] border-t border-red-900/30 p-4 flex justify-center items-center gap-6 z-10">
-        <div className="flex items-center gap-3 bg-[#222] px-4 py-2 rounded-2xl border border-gray-800 shadow-inner">
-          <TrackToggle source={Track.Source.Microphone} className="!bg-gray-800 hover:!bg-gray-700 !text-white !border-none !rounded-xl transition-all" />
-          <TrackToggle source={Track.Source.Camera} className="!bg-gray-800 hover:!bg-gray-700 !text-white !border-none !rounded-xl transition-all" />
-          <TrackToggle source={Track.Source.ScreenShare} className="!bg-gray-800 hover:!bg-gray-700 !text-white !border-none !rounded-xl transition-all" />
+      {/* 3. Нижняя панель в стиле ZOOM */}
+      <footer className="bg-[#111] p-3 flex justify-between items-center z-10 border-t border-gray-900 px-6">
+        
+        {/* Левый блок: Настройки и Запись */}
+        <div className="flex gap-1 w-1/3">
+          <button 
+            onClick={() => alert('Настройки камеры и микрофона (в разработке)')}
+            className="flex flex-col items-center justify-center w-14 h-12 rounded-lg hover:bg-gray-800 text-gray-400 hover:text-white transition"
+          >
+            <span className="text-lg">⚙️</span>
+            <span className="text-[10px] mt-0.5">Настройки</span>
+          </button>
+          
+          <button 
+            onClick={() => alert('Запись урока начнется (в разработке)')}
+            className="flex flex-col items-center justify-center w-14 h-12 rounded-lg hover:bg-gray-800 text-gray-400 hover:text-white transition"
+          >
+            <span className="text-lg">⏺️</span>
+            <span className="text-[10px] mt-0.5">Запись</span>
+          </button>
         </div>
-        <DisconnectButton className="!bg-red-600 hover:!bg-red-500 !text-white px-6 py-3 !rounded-xl font-bold tracking-wide transition-all shadow-lg shadow-red-900/40 border border-red-500">
-          Завершить урок
-        </DisconnectButton>
+
+        {/* Центральный блок: Основные инструменты */}
+        <div className="flex items-center gap-2 bg-[#222] px-4 py-1.5 rounded-2xl border border-gray-800">
+          <TrackToggle source={Track.Source.Microphone} className="!bg-transparent hover:!bg-gray-700 !text-white !border-none !rounded-xl transition-all" />
+          <TrackToggle source={Track.Source.Camera} className="!bg-transparent hover:!bg-gray-700 !text-white !border-none !rounded-xl transition-all" />
+          <TrackToggle source={Track.Source.ScreenShare} className="!bg-transparent hover:!bg-gray-700 !text-white !border-none !rounded-xl transition-all" />
+          
+          <div className="w-px h-8 bg-gray-700 mx-1"></div> {/* Разделитель */}
+
+          <button 
+            onClick={() => alert('Модуль загрузки PDF и презентаций (в разработке)')}
+            className="flex flex-col items-center justify-center w-12 h-10 bg-transparent hover:bg-gray-700 text-white rounded-xl transition"
+            title="Загрузить материалы"
+          >
+            <span className="text-xl">📁</span>
+          </button>
+        </div>
+
+        {/* Правый блок: Выход */}
+        <div className="flex justify-end w-1/3">
+          <DisconnectButton className="!bg-red-600 hover:!bg-red-500 !text-white px-5 py-2.5 !rounded-xl text-sm font-bold tracking-wide transition-all">
+            Завершить
+          </DisconnectButton>
+        </div>
+
       </footer>
       
     </div>
@@ -152,7 +174,7 @@ export default function Home() {
   }, []);
 
   if (!token) {
-    return <div className="text-white flex items-center justify-center h-screen bg-[#111111]">Загрузка платформы Alverium...</div>;
+    return <div className="text-white flex items-center justify-center h-screen bg-[#0a0a0a]">Загрузка платформы Alverium...</div>;
   }
 
   return (
