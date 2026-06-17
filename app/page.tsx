@@ -15,7 +15,7 @@ import {
 import { Track } from 'livekit-client';
 
 // ====================================================
-// ПРЕМИУМ SVG ИКОНКИ (Вместо дешевых эмодзи)
+// ПРЕМИУМ SVG ИКОНКИ
 // ====================================================
 const SettingsIcon = () => (
   <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" className="w-5 h-5">
@@ -43,8 +43,14 @@ const SendIcon = () => (
   </svg>
 );
 
+const CloseIcon = () => (
+  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className="w-5 h-5">
+    <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
+  </svg>
+);
+
 // ====================================================
-// ЧАТ (Стиль: Матовое стекло и минимализм)
+// ЧАТ
 // ====================================================
 function AlveriumChat() {
   const { send, chatMessages, isSending } = useChat();
@@ -87,11 +93,7 @@ function AlveriumChat() {
           placeholder="Написать..." 
           className="flex-1 bg-white/5 text-white text-sm px-4 py-3 rounded-xl border border-white/5 focus:outline-none focus:border-red-900/50 focus:bg-white/10 transition-all font-light placeholder:text-gray-600"
         />
-        <button 
-          type="submit" 
-          disabled={isSending || !message.trim()} 
-          className="bg-red-800 hover:bg-red-700 text-white w-12 rounded-xl flex items-center justify-center transition-all disabled:opacity-30 shadow-[0_0_15px_rgba(153,27,27,0.3)]"
-        >
+        <button type="submit" disabled={isSending || !message.trim()} className="bg-red-800 hover:bg-red-700 text-white w-12 rounded-xl flex items-center justify-center transition-all disabled:opacity-30 shadow-[0_0_15px_rgba(153,27,27,0.3)]">
           <SendIcon />
         </button>
       </form>
@@ -103,6 +105,8 @@ function AlveriumChat() {
 // ГЛАВНЫЙ ИНТЕРФЕЙС КОМНАТЫ
 // ====================================================
 function AlveriumStage() {
+  const [isFilesOpen, setIsFilesOpen] = useState(false); // <-- Состояние для окна файлов
+
   const tracks = useTracks(
     [
       { source: Track.Source.Camera, withPlaceholder: true },
@@ -134,15 +138,55 @@ function AlveriumStage() {
           </GridLayout>
         </div>
         <AlveriumChat />
+
+        {/* ==================================================== */}
+        {/* ПРЕМИУМ ОКНО ДЛЯ ФАЙЛОВ (Оверлей)                    */}
+        {/* ==================================================== */}
+        {isFilesOpen && (
+          <div className="absolute inset-0 z-50 flex items-center justify-center bg-black/70 backdrop-blur-sm transition-all duration-300">
+            <div className="bg-[#050505] border border-white/10 rounded-2xl w-[420px] p-8 shadow-[0_0_50px_rgba(0,0,0,0.8)] relative flex flex-col gap-5">
+              
+              {/* Кнопка закрытия */}
+              <button 
+                onClick={() => setIsFilesOpen(false)} 
+                className="absolute top-6 right-6 text-gray-600 hover:text-white transition-colors"
+              >
+                <CloseIcon />
+              </button>
+              
+              <div>
+                <h2 className="text-base font-semibold text-gray-100 tracking-wide mb-1">Материалы урока</h2>
+                <p className="text-xs text-gray-500 font-light leading-relaxed">
+                  Загрузите PDF или презентацию. Ученики увидят материал на главном экране.
+                </p>
+              </div>
+
+              {/* Зона Drag & Drop */}
+              <div className="border border-dashed border-white/10 rounded-2xl p-10 flex flex-col items-center justify-center gap-4 hover:border-white/30 hover:bg-white/5 transition-all cursor-pointer group mt-2">
+                <div className="p-4 bg-white/5 rounded-full group-hover:scale-110 transition-transform duration-500 text-gray-400 group-hover:text-white">
+                  <FileIcon />
+                </div>
+                <span className="text-[10px] text-gray-400 text-center tracking-widest uppercase leading-loose">
+                  Перетащите файлы сюда<br/>или нажмите для выбора
+                </span>
+              </div>
+
+              <button className="bg-white/10 hover:bg-white/20 border border-white/5 text-white py-3.5 rounded-xl text-xs font-semibold tracking-widest uppercase transition-all mt-2 shadow-inner">
+                Выбрать файл
+              </button>
+            </div>
+          </div>
+        )}
+
       </main>
 
-      {/* 3. ПРЕМИУМ ПАНЕЛЬ (Glassmorphism) */}
+      {/* 3. ПРЕМИУМ ПАНЕЛЬ */}
       <footer className="bg-[#050505]/90 backdrop-blur-2xl px-8 py-4 flex justify-between items-center z-20 border-t border-white/5">
         
         {/* Левый блок */}
         <div className="flex gap-3 w-1/3">
           <button 
-            onClick={() => alert('Настройки (в разработке)')}
+            onClick={() => alert('Окно настроек добавим следующим шагом!')}
             className="flex items-center justify-center w-12 h-12 rounded-xl bg-white/5 border border-white/5 hover:bg-white/10 text-gray-400 hover:text-white transition-all duration-300 group"
           >
             <div className="group-hover:rotate-90 transition-transform duration-500">
@@ -166,8 +210,9 @@ function AlveriumStage() {
           
           <div className="w-[1px] h-6 bg-white/10 mx-2"></div>
 
+          {/* Кнопка открытия окна материалов */}
           <button 
-            onClick={() => alert('Файлы (в разработке)')}
+            onClick={() => setIsFilesOpen(true)}
             className="flex items-center justify-center w-12 h-10 bg-transparent hover:bg-white/10 text-gray-300 hover:text-white rounded-xl transition-all"
           >
             <FileIcon />
@@ -176,7 +221,7 @@ function AlveriumStage() {
 
         {/* Правый блок */}
         <div className="flex justify-end w-1/3">
-          <DisconnectButton className="!bg-red-800 hover:!bg-red-700 !text-white px-6 py-3 !rounded-xl text-xs font-semibold tracking-wider uppercase transition-all shadow-[0_0_20px_rgba(153,27,27,0.3)] !border !border-red-600/50">
+          <DisconnectButton className="!bg-red-800 hover:!bg-red-700 !text-white px-6 py-3 !rounded-xl text-[10px] font-bold tracking-[0.2em] uppercase transition-all shadow-[0_0_20px_rgba(153,27,27,0.3)] !border !border-red-600/50">
             Завершить
           </DisconnectButton>
         </div>
