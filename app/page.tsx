@@ -5,14 +5,15 @@ import '@livekit/components-styles';
 import {
   LiveKitRoom,
   RoomAudioRenderer,
-  ControlBar,
   GridLayout,
   ParticipantTile,
-  useTracks
+  useTracks,
+  TrackToggle,       // Добавили для кнопок
+  DisconnectButton   // Добавили для красной кнопки выхода
 } from '@livekit/components-react';
 import { Track } from 'livekit-client';
 
-// Это наш новый кастомный интерфейс комнаты
+// Это наш кастомный интерфейс комнаты
 function AlveriumStage() {
   // Хук LiveKit: собирает все видео с камер и экранов участников
   const tracks = useTracks(
@@ -41,17 +42,36 @@ function AlveriumStage() {
       </header>
 
       {/* 2. Главный экран с сеткой видео */}
-      <main className="flex-1 p-4 overflow-hidden">
+      <main className="flex-1 p-4 overflow-hidden relative">
         <GridLayout tracks={tracks} style={{ height: '100%' }}>
-          {/* ParticipantTile отвечает за отрисовку каждого отдельного видео */}
           <ParticipantTile />
         </GridLayout>
       </main>
 
-      {/* 3. Нижняя панель управления */}
-      <footer className="bg-[#1a1a1a] border-t border-gray-800 p-4 flex justify-center">
-        {/* Пока берем минимальную стандартную панель, позже сверстаем свои кнопки */}
-        <ControlBar variation="minimal" />
+      {/* 3. Фирменная нижняя панель управления Alverium */}
+      <footer className="bg-[#1a1a1a] border-t border-red-900/30 p-4 flex justify-center items-center gap-6 z-10">
+        
+        {/* Блок с основными инструментами */}
+        <div className="flex items-center gap-3 bg-[#222] px-4 py-2 rounded-2xl border border-gray-800 shadow-inner">
+          <TrackToggle 
+            source={Track.Source.Microphone} 
+            className="!bg-gray-800 hover:!bg-gray-700 !text-white !border-none !rounded-xl transition-all"
+          />
+          <TrackToggle 
+            source={Track.Source.Camera} 
+            className="!bg-gray-800 hover:!bg-gray-700 !text-white !border-none !rounded-xl transition-all"
+          />
+          <TrackToggle 
+            source={Track.Source.ScreenShare} 
+            className="!bg-gray-800 hover:!bg-gray-700 !text-white !border-none !rounded-xl transition-all"
+          />
+        </div>
+
+        {/* Красная кнопка завершения */}
+        <DisconnectButton className="!bg-red-600 hover:!bg-red-500 !text-white px-6 py-3 !rounded-xl font-bold tracking-wide transition-all shadow-lg shadow-red-900/40 border border-red-500">
+          Завершить урок
+        </DisconnectButton>
+
       </footer>
       
     </div>
@@ -86,7 +106,6 @@ export default function Home() {
       audio={true}
       token={token}
       serverUrl={roomUrl}
-      // Отключаем стандартную тему, так как теперь мы пишем свой дизайн
       data-lk-theme="none" 
     >
       <AlveriumStage />
