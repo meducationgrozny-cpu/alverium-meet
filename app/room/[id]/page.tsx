@@ -1,4 +1,3 @@
-
 "use client";
 
 import { useState, Suspense } from 'react';
@@ -15,6 +14,9 @@ import {
   useChat
 } from '@livekit/components-react';
 import { Track } from 'livekit-client';
+
+// Подключаем наш новый компонент Интерактивной доски
+import AlveriumWhiteboard from './Whiteboard';
 
 // ====================================================
 // ПРЕМИУМ SVG ИКОНКИ
@@ -33,9 +35,10 @@ const RecordIcon = () => (
   </svg>
 );
 
-const FileIcon = () => (
+// Иконка Ручки для активации Интерактивной доски
+const PenIcon = () => (
   <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" className="w-5 h-5">
-    <path strokeLinecap="round" strokeLinejoin="round" d="M19.5 14.25v-2.625a3.375 3.375 0 00-3.375-3.375h-1.5A1.125 1.125 0 0113.5 7.125v-1.5a3.375 3.375 0 00-3.375-3.375H8.25m3.75 9v6m3-3H9m1.5-12H5.625c-.621 0-1.125.504-1.125 1.125v17.25c0 .621.504 1.125 1.125 1.125h12.75c.621 0 1.125-.504 1.125-1.125V11.25a9 9 0 00-9-9z" />
+    <path strokeLinecap="round" strokeLinejoin="round" d="M16.862 4.487l1.687-1.688a1.875 1.875 0 112.652 2.652L6.832 19.82a4.5 4.5 0 01-1.89 1.12l-2.827.942a.375.375 0 01-.475-.475l.942-2.827a4.5 4.5 0 011.12-1.89l13.13-13.132z" />
   </svg>
 );
 
@@ -74,7 +77,6 @@ function AlveriumChat({ isOpen, onClose }: { isOpen: boolean, onClose: () => voi
 
   return (
     <>
-      {/* Затемнение для мобильной шторки */}
       {isOpen && (
         <div className="md:hidden fixed inset-0 bg-black/60 z-30" onClick={onClose} />
       )}
@@ -121,8 +123,8 @@ function AlveriumChat({ isOpen, onClose }: { isOpen: boolean, onClose: () => voi
 // ГЛАВНЫЙ ИНТЕРФЕЙС КОМНАТЫ
 // ====================================================
 function AlveriumStage() {
-  const [isFilesOpen, setIsFilesOpen] = useState(false);
   const [isChatOpen, setIsChatOpen] = useState(false);
+  const [isWhiteboardOpen, setIsWhiteboardOpen] = useState(false); // Стейт для доски
 
   // Разделяем треки на камеры и трансляции экрана
   const screenTracks = useTracks([Track.Source.ScreenShare], { onlySubscribed: false });
@@ -146,9 +148,29 @@ function AlveriumStage() {
       {/* ЦЕНТРАЛЬНАЯ ЧАСТЬ */}
       <main className="flex-1 flex overflow-hidden relative">
         <div className="flex-1 relative bg-[#0a0a0a]">
-          {hasScreenShare ? (
+          
+          {/* ЛОГИКА РЕНДЕРИНГА ЭКРАНА */}
+          {isWhiteboardOpen ? (
             <>
-              {/* Показ презентации (100% экрана) */}
+              {/* Показ интерактивной доски (100% экрана) */}
+              <div className="absolute inset-0 p-2 md:p-4">
+                <AlveriumWhiteboard />
+              </div>
+              
+              {/* Плавающее окно с камерами спикеров (PiP) */}
+              {cameraTracks.length > 0 && (
+                <div className="absolute bottom-4 right-4 md:bottom-6 md:right-6 z-20 w-28 md:w-48 max-h-[60vh] overflow-y-auto flex flex-col gap-2 p-1.5 md:p-2 bg-black/60 backdrop-blur-md rounded-xl border border-white/10 shadow-2xl">
+                  {cameraTracks.map((track) => (
+                    <div key={track.publication?.trackSid || track.participant.identity} className="w-full aspect-video bg-black rounded-lg overflow-hidden shadow-inner relative">
+                      <ParticipantTile trackRef={track} />
+                    </div>
+                  ))}
+                </div>
+              )}
+            </>
+          ) : hasScreenShare ? (
+            <>
+              {/* Показ трансляции экрана (100% экрана) */}
               <div className="absolute inset-0 p-2 md:p-4">
                 <GridLayout tracks={screenTracks} style={{ height: '100%', width: '100%' }}>
                   <ParticipantTile />
@@ -174,32 +196,10 @@ function AlveriumStage() {
               </GridLayout>
             </div>
           )}
+
         </div>
 
         <AlveriumChat isOpen={isChatOpen} onClose={() => setIsChatOpen(false)} />
-
-        {/* ОКНО ИНФОРМАЦИИ О ФАЙЛАХ */}
-        {isFilesOpen && (
-          <div className="absolute inset-0 z-50 flex items-center justify-center bg-black/70 backdrop-blur-sm transition-all duration-300 px-4">
-            <div className="bg-[#050505] border border-white/10 rounded-2xl w-[420px] p-8 shadow-[0_0_50px_rgba(0,0,0,0.8)] relative flex flex-col gap-3">
-              <button onClick={() => setIsFilesOpen(false)} className="absolute top-6 right-6 text-gray-600 hover:text-white transition-colors">
-                <CloseIcon />
-              </button>
-              <div>
-                <h2 className="text-base font-semibold text-gray-100 tracking-wide mb-1">Файлы и PDF</h2>
-                <p className="text-sm text-gray-400 font-light leading-relaxed mt-2">
-                  В текущей версии для идеального показа PDF и сохранения рисунков используйте трансляцию экрана.<br/><br/>
-                  1. Откройте PDF на вашем устройстве.<br/>
-                  2. Нажмите кнопку <b>Демонстрация экрана</b> на панели внизу.<br/>
-                  3. Выберите окно с вашим PDF.
-                </p>
-              </div>
-              <button onClick={() => setIsFilesOpen(false)} className="bg-white/10 hover:bg-white/20 border border-white/5 text-white py-3.5 rounded-xl text-xs font-semibold tracking-widest uppercase transition-all mt-4 shadow-inner">
-                Понятно
-              </button>
-            </div>
-          </div>
-        )}
       </main>
 
       {/* НИЖНЯЯ ПАНЕЛЬ */}
@@ -210,6 +210,19 @@ function AlveriumStage() {
           </button>
           <button onClick={() => alert('Запись (в разработке)')} className="hidden md:flex items-center justify-center w-12 h-12 rounded-xl bg-white/5 border border-white/5 hover:bg-red-900/20 text-gray-400 transition-all duration-300 group">
             <RecordIcon />
+          </button>
+          
+          {/* КНОПКА ИНТЕРАКТИВНОЙ ДОСКИ (Активирует Whiteboard) */}
+          <button 
+            onClick={() => setIsWhiteboardOpen(!isWhiteboardOpen)} 
+            className={`flex items-center justify-center w-10 h-10 md:w-12 md:h-12 rounded-xl border transition-all duration-300 ${
+              isWhiteboardOpen 
+                ? 'bg-red-800 border-red-600 text-white shadow-[0_0_15px_rgba(153,27,27,0.4)]' 
+                : 'bg-white/5 border-white/5 hover:bg-white/10 text-gray-400 hover:text-white'
+            }`}
+            title="Интерактивная доска и PDF"
+          >
+            <PenIcon />
           </button>
         </div>
         
@@ -223,10 +236,6 @@ function AlveriumStage() {
           {/* Кнопка вызова чата на мобилках */}
           <button onClick={() => setIsChatOpen(true)} className="md:hidden flex items-center justify-center w-10 h-10 bg-transparent hover:bg-white/10 text-gray-300 hover:text-white rounded-xl transition-all">
             <ChatIcon />
-          </button>
-          
-          <button onClick={() => setIsFilesOpen(true)} className="hidden md:flex items-center justify-center w-12 h-10 bg-transparent hover:bg-white/10 text-gray-300 hover:text-white rounded-xl transition-all">
-            <FileIcon />
           </button>
         </div>
 
