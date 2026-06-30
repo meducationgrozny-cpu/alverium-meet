@@ -1,3 +1,4 @@
+
 "use client";
 
 import React, { useState, Suspense, useEffect } from 'react';
@@ -13,11 +14,11 @@ import {
   TrackToggle,
   DisconnectButton,
   useChat,
-  useRoomContext // ДОБАВИЛИ ДЛЯ ДОСТУПА К СОБЫТИЯМ КОМНАТЫ
+  useRoomContext,
+  useParticipants // Добавили хук для получения списка участников
 } from '@livekit/components-react';
-import { Track, RoomEvent } from 'livekit-client'; // ДОБАВИЛИ RoomEvent
+import { Track, RoomEvent } from 'livekit-client';
 
-// Отключаем серверный рендеринг (SSR) для доски, чтобы Node.js не падал из-за DOMMatrix
 const AlveriumWhiteboard = dynamic(() => import('./Whiteboard'), { 
   ssr: false,
   loading: () => <div className="text-gray-500 font-light text-xs animate-pulse p-4">Загрузка доски...</div>
@@ -32,18 +33,12 @@ function parseJwtAdmin(token: string | null) {
     const base64Url = token.split('.')[1];
     if (!base64Url) return false;
     const base64 = base64Url.replace(/-/g, '+').replace(/_/g, '/');
-    
-    // Метод 1: Безопасный парсинг с поддержкой кириллицы (UTF-8)
     const jsonPayload = decodeURIComponent(
-      atob(base64)
-        .split('')
-        .map((c) => '%' + ('00' + c.charCodeAt(0).toString(16)).slice(-2))
-        .join('')
+      atob(base64).split('').map((c) => '%' + ('00' + c.charCodeAt(0).toString(16)).slice(-2)).join('')
     );
     const payload = JSON.parse(jsonPayload);
     return payload?.video?.roomAdmin === true;
   } catch (e) {
-    // Метод 2: Классический парсинг (фоллбэк)
     try {
       const payload = JSON.parse(atob(token.split('.')[1]));
       return payload?.video?.roomAdmin === true;
@@ -57,48 +52,38 @@ function parseJwtAdmin(token: string | null) {
 // ПРЕМИУМ SVG ИКОНКИ
 // ====================================================
 const SettingsIcon = () => (
-  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" className="w-5 h-5">
-    <path strokeLinecap="round" strokeLinejoin="round" d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z" />
-    <path strokeLinecap="round" strokeLinejoin="round" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
-  </svg>
+  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" className="w-5 h-5"><path strokeLinecap="round" strokeLinejoin="round" d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z" /><path strokeLinecap="round" strokeLinejoin="round" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" /></svg>
 );
-
 const RecordIcon = () => (
-  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" className="w-5 h-5 group-hover:stroke-red-500 transition-colors">
-    <circle cx="12" cy="12" r="10" />
-    <circle cx="12" cy="12" r="4" fill="currentColor" className="text-red-600 group-hover:text-red-500 transition-colors" />
-  </svg>
+  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" className="w-5 h-5 group-hover:stroke-red-500 transition-colors"><circle cx="12" cy="12" r="10" /><circle cx="12" cy="12" r="4" fill="currentColor" className="text-red-600 group-hover:text-red-500 transition-colors" /></svg>
 );
-
 const PenIcon = () => (
-  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" className="w-5 h-5">
-    <path strokeLinecap="round" strokeLinejoin="round" d="M16.862 4.487l1.687-1.688a1.875 1.875 0 112.652 2.652L6.832 19.82a4.5 4.5 0 01-1.89 1.12l-2.827.942a.375.375 0 01-.475-.475l.942-2.827a4.5 4.5 0 011.12-1.89l13.13-13.132z" />
-  </svg>
+  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" className="w-5 h-5"><path strokeLinecap="round" strokeLinejoin="round" d="M16.862 4.487l1.687-1.688a1.875 1.875 0 112.652 2.652L6.832 19.82a4.5 4.5 0 01-1.89 1.12l-2.827.942a.375.375 0 01-.475-.475l.942-2.827a4.5 4.5 0 011.12-1.89l13.13-13.132z" /></svg>
 );
-
-const ChatIcon = () => (
-  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" className="w-5 h-5">
-    <path strokeLinecap="round" strokeLinejoin="round" d="M12 20.25c4.97 0 9-3.694 9-8.25s-4.03-8.25-9-8.25S3 7.444 3 12c0 2.104.859 4.023 2.373 5.472v3.028l2.946-1.5A9.743 9.743 0 0012 20.25z" />
-  </svg>
+const SidebarIcon = () => (
+  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" className="w-5 h-5"><path strokeLinecap="round" strokeLinejoin="round" d="M10.5 6h9.75M10.5 6a1.5 1.5 0 11-3 0m3 0a1.5 1.5 0 10-3 0M3.75 6H7.5m3 12h9.75m-9.75 0a1.5 1.5 0 01-3 0m3 0a1.5 1.5 0 00-3 0m-3.75 0H7.5m9-6h3.75m-3.75 0a1.5 1.5 0 01-3 0m3 0a1.5 1.5 0 00-3 0m-9.75 0h9.75" /></svg>
 );
-
 const SendIcon = () => (
-  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className="w-4 h-4">
-    <path strokeLinecap="round" strokeLinejoin="round" d="M6 12L3.269 3.126A59.768 59.768 0 0121.485 12 59.77 59.77 0 013.27 20.876L5.999 12zm0 0h7.5" />
-  </svg>
+  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className="w-4 h-4"><path strokeLinecap="round" strokeLinejoin="round" d="M6 12L3.269 3.126A59.768 59.768 0 0121.485 12 59.77 59.77 0 013.27 20.876L5.999 12zm0 0h7.5" /></svg>
 );
-
 const CloseIcon = () => (
-  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className="w-5 h-5">
-    <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
-  </svg>
+  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className="w-5 h-5"><path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" /></svg>
+);
+const MuteIcon = () => (
+  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" className="w-4 h-4"><path strokeLinecap="round" strokeLinejoin="round" d="M12 18.75a6 6 0 006-6v-1.5m-6 7.5a6 6 0 01-6-6v-1.5m6 7.5v3.75m-3.75 0h7.5M12 15.75a3 3 0 01-3-3V4.5a3 3 0 116 0v8.25a3 3 0 01-3 3z" /><line x1="3" y1="3" x2="21" y2="21" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round"/></svg>
+);
+const KickIcon = () => (
+  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" className="w-4 h-4"><path strokeLinecap="round" strokeLinejoin="round" d="M15.75 9V5.25A2.25 2.25 0 0013.5 3h-6a2.25 2.25 0 00-2.25 2.25v13.5A2.25 2.25 0 007.5 21h6a2.25 2.25 0 002.25-2.25V15M12 9l-3 3m0 0l3 3m-3-3h12.75" /></svg>
 );
 
 // ====================================================
-// ЧАТ (Адаптивный: Шторка на мобилках, Блок на ПК)
+// БОКОВАЯ ПАНЕЛЬ: ЧАТ И УЧАСТНИКИ
 // ====================================================
-function AlveriumChat({ isOpen, onClose }: { isOpen: boolean, onClose: () => void }) {
+function AlveriumSidebar({ isOpen, onClose, isHost }: { isOpen: boolean, onClose: () => void, isHost: boolean }) {
+  const [activeTab, setActiveTab] = useState<'chat' | 'participants'>('chat');
   const { send, chatMessages, isSending } = useChat();
+  const participants = useParticipants();
+  const room = useRoomContext();
   const [message, setMessage] = useState("");
 
   const handleSend = (e: React.FormEvent) => {
@@ -109,6 +94,19 @@ function AlveriumChat({ isOpen, onClose }: { isOpen: boolean, onClose: () => voi
     }
   };
 
+  // ФУНКЦИИ УПРАВЛЕНИЯ КЛАССОМ
+  const handleMute = (identity: string) => {
+    const msg = JSON.stringify({ type: 'FORCE_MUTE', target: identity });
+    room.localParticipant.publishData(new TextEncoder().encode(msg), { reliable: true });
+  };
+
+  const handleKick = (identity: string) => {
+    if(window.confirm("Удалить пользователя с урока?")) {
+      const msg = JSON.stringify({ type: 'KICK', target: identity });
+      room.localParticipant.publishData(new TextEncoder().encode(msg), { reliable: true });
+    }
+  };
+
   return (
     <>
       {isOpen && (
@@ -116,40 +114,109 @@ function AlveriumChat({ isOpen, onClose }: { isOpen: boolean, onClose: () => voi
       )}
       
       <div className={`fixed md:relative inset-y-0 right-0 z-40 flex flex-col h-full bg-[#050505] border-l border-white/5 w-[85%] md:w-80 shrink-0 transform transition-transform duration-300 ease-in-out ${isOpen ? 'translate-x-0' : 'translate-x-full md:translate-x-0'}`}>
-        <div className="p-5 border-b border-white/5 flex justify-between items-center">
-          <h2 className="text-[10px] font-bold text-gray-500 uppercase tracking-[0.2em]">Чат класса</h2>
-          <button onClick={onClose} className="md:hidden text-gray-400 hover:text-white transition-colors">
-            <CloseIcon />
-          </button>
+        
+        {/* ТАБЫ */}
+        <div className="p-3 border-b border-white/5 flex flex-col gap-3">
+          <div className="flex justify-between items-center px-2">
+            <h2 className="text-[10px] font-bold text-gray-500 uppercase tracking-[0.2em]">Панель управления</h2>
+            <button onClick={onClose} className="md:hidden text-gray-400 hover:text-white transition-colors">
+              <CloseIcon />
+            </button>
+          </div>
+          
+          <div className="flex bg-white/5 p-1 rounded-lg">
+            <button 
+              onClick={() => setActiveTab('chat')}
+              className={`flex-1 text-xs py-2 rounded-md font-medium transition-all ${activeTab === 'chat' ? 'bg-[#1a1a1a] text-white shadow-sm' : 'text-gray-500 hover:text-gray-300'}`}
+            >
+              Чат
+            </button>
+            <button 
+              onClick={() => setActiveTab('participants')}
+              className={`flex-1 text-xs py-2 rounded-md font-medium transition-all ${activeTab === 'participants' ? 'bg-[#1a1a1a] text-white shadow-sm' : 'text-gray-500 hover:text-gray-300'}`}
+            >
+              Участники ({participants.length})
+            </button>
+          </div>
         </div>
-        <div className="flex-1 overflow-y-auto p-5 space-y-5">
-          {chatMessages.length === 0 ? (
-            <div className="text-gray-600 text-xs text-center mt-10 font-light tracking-wide">Тишина в аудитории...</div>
-          ) : (
-            chatMessages.map((msg, i) => (
-              <div key={i} className="flex flex-col">
-                <span className="text-[10px] text-gray-500 mb-1.5 ml-1 tracking-wide">
-                  {(msg.from as any)?.name || msg.from?.identity || "Гость"}
-                </span>
-                <div className="bg-white/5 text-sm text-gray-200 p-3.5 rounded-2xl rounded-tl-sm border border-white/5 font-light leading-relaxed">
-                  {msg.message}
-                </div>
-              </div>
-            ))
+
+        {/* СОДЕРЖИМОЕ ТАБОВ */}
+        <div className="flex-1 overflow-y-auto p-5 custom-scrollbar">
+          
+          {activeTab === 'chat' && (
+            <div className="space-y-5 h-full flex flex-col justify-end">
+              {chatMessages.length === 0 ? (
+                <div className="text-gray-600 text-xs text-center mt-auto mb-auto font-light tracking-wide">Тишина в аудитории...</div>
+              ) : (
+                chatMessages.map((msg, i) => (
+                  <div key={i} className="flex flex-col">
+                    <span className="text-[10px] text-gray-500 mb-1.5 ml-1 tracking-wide">
+                      {(msg.from as any)?.name || msg.from?.identity || "Гость"}
+                    </span>
+                    <div className="bg-white/5 text-sm text-gray-200 p-3.5 rounded-2xl rounded-tl-sm border border-white/5 font-light leading-relaxed break-words">
+                      {msg.message}
+                    </div>
+                  </div>
+                ))
+              )}
+            </div>
           )}
+
+          {activeTab === 'participants' && (
+            <div className="space-y-3">
+              {participants.map((p) => (
+                <div key={p.identity} className="flex items-center justify-between p-3 bg-white/5 border border-white/5 rounded-xl">
+                  <div className="flex items-center gap-3 overflow-hidden">
+                    <div className="w-8 h-8 rounded-full bg-gray-800 flex items-center justify-center text-xs font-bold text-gray-300 shrink-0">
+                      {p.name?.[0]?.toUpperCase() || p.identity[0].toUpperCase()}
+                    </div>
+                    <span className="text-sm font-medium text-gray-200 truncate" title={p.name || p.identity}>
+                      {p.name || p.identity}
+                      {p.isLocal && <span className="ml-2 text-[9px] text-gray-500 uppercase tracking-widest">(Вы)</span>}
+                    </span>
+                  </div>
+                  
+                  {/* ИНСТРУМЕНТЫ ПРЕПОДАВАТЕЛЯ */}
+                  {isHost && !p.isLocal && (
+                    <div className="flex items-center gap-1 shrink-0">
+                      <button 
+                        onClick={() => handleMute(p.identity)}
+                        title="Выключить микрофон"
+                        className="p-1.5 text-gray-500 hover:text-white hover:bg-white/10 rounded-lg transition-all"
+                      >
+                        <MuteIcon />
+                      </button>
+                      <button 
+                        onClick={() => handleKick(p.identity)}
+                        title="Удалить с урока"
+                        className="p-1.5 text-gray-500 hover:text-red-500 hover:bg-red-500/10 rounded-lg transition-all"
+                      >
+                        <KickIcon />
+                      </button>
+                    </div>
+                  )}
+                </div>
+              ))}
+            </div>
+          )}
+
         </div>
-        <form onSubmit={handleSend} className="p-4 border-t border-white/5 flex gap-3 bg-[#030303]">
-          <input 
-            type="text" 
-            value={message}
-            onChange={(e) => setMessage(e.target.value)}
-            placeholder="Написать..." 
-            className="flex-1 bg-white/5 text-white text-sm px-4 py-3 rounded-xl border border-white/5 focus:outline-none focus:border-red-900/50 focus:bg-white/10 transition-all font-light placeholder:text-gray-600"
-          />
-          <button type="submit" disabled={isSending || !message.trim()} className="bg-red-800 hover:bg-red-700 text-white w-12 rounded-xl flex items-center justify-center transition-all disabled:opacity-30 shadow-[0_0_15px_rgba(153,27,27,0.3)]">
-            <SendIcon />
-          </button>
-        </form>
+
+        {/* ПОЛЕ ВВОДА ЧАТА */}
+        {activeTab === 'chat' && (
+          <form onSubmit={handleSend} className="p-4 border-t border-white/5 flex gap-3 bg-[#030303]">
+            <input 
+              type="text" 
+              value={message}
+              onChange={(e) => setMessage(e.target.value)}
+              placeholder="Написать..." 
+              className="flex-1 bg-white/5 text-white text-sm px-4 py-3 rounded-xl border border-white/5 focus:outline-none focus:border-red-900/50 focus:bg-white/10 transition-all font-light placeholder:text-gray-600"
+            />
+            <button type="submit" disabled={isSending || !message.trim()} className="bg-red-800 hover:bg-red-700 text-white w-12 rounded-xl flex items-center justify-center transition-all disabled:opacity-30 shadow-[0_0_15px_rgba(153,27,27,0.3)]">
+              <SendIcon />
+            </button>
+          </form>
+        )}
       </div>
     </>
   );
@@ -159,29 +226,37 @@ function AlveriumChat({ isOpen, onClose }: { isOpen: boolean, onClose: () => voi
 // ГЛАВНЫЙ ИНТЕРФЕЙС КОМНАТЫ
 // ====================================================
 function AlveriumStage() {
-  const [isChatOpen, setIsChatOpen] = useState(false);
+  const [isSidebarOpen, setIsSidebarOpen] = useState(false);
   const [isWhiteboardOpen, setIsWhiteboardOpen] = useState(false);
-  const [isHost, setIsHost] = useState(false);
+  const [isHost, setIsHost] = useState(false); 
 
   const searchParams = useSearchParams();
   const token = searchParams.get('token');
-  const room = useRoomContext(); // Получаем контекст комнаты для системных сообщений
+  const room = useRoomContext(); 
 
-  // 1. Проверяем права админа из токена
+  // Проверяем права
   useEffect(() => {
     setIsHost(parseJwtAdmin(token));
   }, [token]);
 
-  // 2. Слушаем системные сообщения (Data Channels)
+  // Слушаем системные сообщения (Доска, Мут, Кик)
   useEffect(() => {
     const handleDataReceived = (payload: Uint8Array) => {
       try {
         const str = new TextDecoder().decode(payload);
         const msg = JSON.parse(str);
         
-        // Если пришла команда открытия/закрытия доски — подчиняемся
         if (msg.type === 'WHITEBOARD_TOGGLE') {
           setIsWhiteboardOpen(msg.isOpen);
+        } 
+        // Ловим команду на принудительный мут
+        else if (msg.type === 'FORCE_MUTE' && msg.target === room.localParticipant.identity) {
+          room.localParticipant.setMicrophoneEnabled(false);
+        } 
+        // Ловим команду на удаление (кик)
+        else if (msg.type === 'KICK' && msg.target === room.localParticipant.identity) {
+          alert("Организатор удалил вас с урока.");
+          room.disconnect();
         }
       } catch (e) {
         console.error("Ошибка парсинга DataChannel", e);
@@ -194,21 +269,15 @@ function AlveriumStage() {
     };
   }, [room]);
 
-  // 3. Функция переключения доски (Отправляет команду всем)
   const toggleWhiteboard = () => {
     const newState = !isWhiteboardOpen;
-    setIsWhiteboardOpen(newState); // Меняем у себя
-    
-    // Если это препод, рассылаем команду всем ученикам
+    setIsWhiteboardOpen(newState);
     if (isHost) {
       const msg = JSON.stringify({ type: 'WHITEBOARD_TOGGLE', isOpen: newState });
-      const data = new TextEncoder().encode(msg);
-      // Публикуем сообщение в комнату с надежной доставкой (reliable: true)
-      room.localParticipant.publishData(data, { reliable: true });
+      room.localParticipant.publishData(new TextEncoder().encode(msg), { reliable: true });
     }
   };
 
-  // Разделяем треки
   const screenTracks = useTracks([Track.Source.ScreenShare], { onlySubscribed: false });
   const cameraTracks = useTracks([Track.Source.Camera], { onlySubscribed: false });
   const hasScreenShare = screenTracks.length > 0;
@@ -231,15 +300,11 @@ function AlveriumStage() {
       <main className="flex-1 flex overflow-hidden relative">
         <div className="flex-1 relative bg-[#0a0a0a]">
           
-          {/* ЛОГИКА РЕНДЕРИНГА ЭКРАНА */}
           {isWhiteboardOpen ? (
             <>
-              {/* Показ интерактивной доски */}
               <div className="absolute inset-0 p-2 md:p-4">
                 <AlveriumWhiteboard isHost={isHost} />
               </div>
-              
-              {/* Плавающее окно с камерами спикеров (PiP) */}
               {cameraTracks.length > 0 && (
                 <div className="absolute bottom-4 right-4 md:bottom-6 md:right-6 z-20 w-28 md:w-48 max-h-[60vh] overflow-y-auto flex flex-col gap-2 p-1.5 md:p-2 bg-black/60 backdrop-blur-md rounded-xl border border-white/10 shadow-2xl">
                   {cameraTracks.map((track) => (
@@ -252,14 +317,11 @@ function AlveriumStage() {
             </>
           ) : hasScreenShare ? (
             <>
-              {/* Показ трансляции экрана */}
               <div className="absolute inset-0 p-2 md:p-4">
                 <GridLayout tracks={screenTracks} style={{ height: '100%', width: '100%' }}>
                   <ParticipantTile />
                 </GridLayout>
               </div>
-              
-              {/* Плавающее окно с камерами спикеров (PiP) */}
               {cameraTracks.length > 0 && (
                 <div className="absolute bottom-4 right-4 md:bottom-6 md:right-6 z-20 w-28 md:w-48 max-h-[60vh] overflow-y-auto flex flex-col gap-2 p-1.5 md:p-2 bg-black/60 backdrop-blur-md rounded-xl border border-white/10 shadow-2xl">
                   {cameraTracks.map((track) => (
@@ -271,7 +333,6 @@ function AlveriumStage() {
               )}
             </>
           ) : (
-            /* Обычная сетка камер */
             <div className="absolute inset-0 p-2 md:p-4">
               <GridLayout tracks={cameraTracks} style={{ height: '100%' }}>
                 <ParticipantTile />
@@ -281,7 +342,8 @@ function AlveriumStage() {
 
         </div>
 
-        <AlveriumChat isOpen={isChatOpen} onClose={() => setIsChatOpen(false)} />
+        {/* НОВАЯ БОКОВАЯ ПАНЕЛЬ С ТАБАМИ */}
+        <AlveriumSidebar isOpen={isSidebarOpen} onClose={() => setIsSidebarOpen(false)} isHost={isHost} />
       </main>
 
       {/* НИЖНЯЯ ПАНЕЛЬ */}
@@ -294,14 +356,11 @@ function AlveriumStage() {
             <RecordIcon />
           </button>
           
-          {/* КНОПКА ИНТЕРАКТИВНОЙ ДОСКИ */}
           {isHost && (
             <button 
-              onClick={toggleWhiteboard} // ПРИВЯЗАЛИ НОВУЮ ФУНКЦИЮ
+              onClick={toggleWhiteboard}
               className={`flex items-center justify-center w-10 h-10 md:w-12 md:h-12 rounded-xl border transition-all duration-300 ${
-                isWhiteboardOpen 
-                  ? 'bg-red-800 border-red-600 text-white shadow-[0_0_15px_rgba(153,27,27,0.4)]' 
-                  : 'bg-white/5 border-white/5 hover:bg-white/10 text-gray-400 hover:text-white'
+                isWhiteboardOpen ? 'bg-red-800 border-red-600 text-white shadow-[0_0_15px_rgba(153,27,27,0.4)]' : 'bg-white/5 border-white/5 hover:bg-white/10 text-gray-400 hover:text-white'
               }`}
               title="Интерактивная доска и PDF"
             >
@@ -319,9 +378,14 @@ function AlveriumStage() {
           
           <div className="w-[1px] h-6 bg-white/10 mx-1 md:mx-2"></div>
           
-          {/* Кнопка вызова чата на мобилках */}
-          <button onClick={() => setIsChatOpen(true)} className="md:hidden flex items-center justify-center w-10 h-10 bg-transparent hover:bg-white/10 text-gray-300 hover:text-white rounded-xl transition-all">
-            <ChatIcon />
+          {/* Кнопка вызова боковой панели (Чат/Участники) */}
+          <button 
+            onClick={() => setIsSidebarOpen(!isSidebarOpen)} 
+            className={`flex items-center justify-center w-10 h-10 md:w-12 md:h-12 rounded-xl border transition-all duration-300 ${
+              isSidebarOpen ? 'bg-white/10 border-white/10 text-white' : 'bg-transparent border-transparent hover:bg-white/10 text-gray-300 hover:text-white'
+            }`}
+          >
+            <SidebarIcon />
           </button>
         </div>
 
