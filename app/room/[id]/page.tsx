@@ -1,5 +1,6 @@
 
 
+
 "use client";
 
 import React, { useState, Suspense } from 'react';
@@ -13,8 +14,7 @@ import {
   useTracks,
   TrackToggle,
   DisconnectButton,
-  useChat,
-  useLocalParticipant
+  useChat
 } from '@livekit/components-react';
 import { Track } from 'livekit-client';
 
@@ -131,9 +131,21 @@ function AlveriumStage() {
   const [isChatOpen, setIsChatOpen] = useState(false);
   const [isWhiteboardOpen, setIsWhiteboardOpen] = useState(false);
 
-  // Получаем данные локального пользователя и жестко обходим типизацию TS для roomAdmin
-  const { localParticipant } = useLocalParticipant();
-  const isHost = (localParticipant?.permissions as any)?.roomAdmin === true;
+  // 1. Берем токен из URL
+  const searchParams = useSearchParams();
+  const token = searchParams.get('token');
+  
+  // 2. Расшифровываем JWT напрямую, чтобы 100% увидеть права, которые дал Турпал
+  let isHost = false;
+  if (token) {
+    try {
+      const base64Payload = token.split('.')[1].replace(/-/g, '+').replace(/_/g, '/');
+      const payload = JSON.parse(atob(base64Payload));
+      isHost = payload?.video?.roomAdmin === true;
+    } catch (e) {
+      console.error("Ошибка парсинга токена", e);
+    }
+  }
 
   // Разделяем треки на камеры и трансляции экрана
   const screenTracks = useTracks([Track.Source.ScreenShare], { onlySubscribed: false });
