@@ -5,6 +5,7 @@
 
 import React, { useState, Suspense, useEffect } from 'react';
 import { useSearchParams, useRouter } from 'next/navigation';
+import dynamic from 'next/dynamic'; // ИМПОРТИРУЕМ DYNAMIC
 import '@livekit/components-styles';
 import {
   LiveKitRoom,
@@ -18,8 +19,11 @@ import {
 } from '@livekit/components-react';
 import { Track } from 'livekit-client';
 
-// Подключаем наш новый компонент Интерактивной доски
-import AlveriumWhiteboard from './Whiteboard';
+// Отключаем серверный рендеринг (SSR) для доски, чтобы Node.js не падал из-за DOMMatrix
+const AlveriumWhiteboard = dynamic(() => import('./Whiteboard'), { 
+  ssr: false,
+  loading: () => <div className="text-gray-500 font-light text-xs animate-pulse p-4">Загрузка доски...</div>
+});
 
 // ====================================================
 // БЕЗОПАСНЫЙ ПАРСЕР JWT ТОКЕНА
