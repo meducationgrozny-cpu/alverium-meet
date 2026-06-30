@@ -1,11 +1,8 @@
-
-
-
 "use client";
 
 import React, { useState, Suspense, useEffect } from 'react';
 import { useSearchParams, useRouter } from 'next/navigation';
-import dynamic from 'next/dynamic'; // ИМПОРТИРУЕМ DYNAMIC
+import dynamic from 'next/dynamic';
 import '@livekit/components-styles';
 import {
   LiveKitRoom,
@@ -15,9 +12,10 @@ import {
   useTracks,
   TrackToggle,
   DisconnectButton,
-  useChat
+  useChat,
+  useRoomContext // ДОБАВИЛИ ДЛЯ ДОСТУПА К СОБЫТИЯМ КОМНАТЫ
 } from '@livekit/components-react';
-import { Track } from 'livekit-client';
+import { Track, RoomEvent } from 'livekit-client'; // ДОБАВИЛИ RoomEvent
 
 // Отключаем серверный рендеринг (SSR) для доски, чтобы Node.js не падал из-за DOMMatrix
 const AlveriumWhiteboard = dynamic(() => import('./Whiteboard'), { 
@@ -45,12 +43,12 @@ function parseJwtAdmin(token: string | null) {
     const payload = JSON.parse(jsonPayload);
     return payload?.video?.roomAdmin === true;
   } catch (e) {
-    // Метод 2: Классический парсинг (фоллбэк, если первый метод не сработал)
+    // Метод 2: Классический парсинг (фоллбэк)
     try {
       const payload = JSON.parse(atob(token.split('.')[1]));
       return payload?.video?.roomAdmin === true;
     } catch (e2) {
-      return false; // Если токен совсем сломан, отдаем права ученика
+      return false;
     }
   }
 }
@@ -163,17 +161,54 @@ function AlveriumChat({ isOpen, onClose }: { isOpen: boolean, onClose: () => voi
 function AlveriumStage() {
   const [isChatOpen, setIsChatOpen] = useState(false);
   const [isWhiteboardOpen, setIsWhiteboardOpen] = useState(false);
-  const [isHost, setIsHost] = useState(false); // Дефолтно считаем всех учениками
+  const [isHost, setIsHost] = useState(false);
 
   const searchParams = useSearchParams();
   const token = searchParams.get('token');
+  const room = useRoomContext(); // Получаем контекст комнаты для системных сообщений
 
-  // Безопасно проверяем токен после загрузки компонента, чтобы не сломать SSR
+  // 1. Проверяем права админа из токена
   useEffect(() => {
     setIsHost(parseJwtAdmin(token));
   }, [token]);
 
-  // Разделяем треки на камеры и трансляции экрана
+  // 2. Слушаем системные сообщения (Data Channels)
+  useEffect(() => {
+    const handleDataReceived = (payload: Uint8Array) => {
+      try {
+        const str = new TextDecoder().decode(payload);
+        const msg = JSON.parse(str);
+        
+        // Если пришла команда открытия/закрытия доски — подчиняемся
+        if (msg.type === 'WHITEBOARD_TOGGLE') {
+          setIsWhiteboardOpen(msg.isOpen);
+        }
+      } catch (e) {
+        console.error("Ошибка парсинга DataChannel", e);
+      }
+    };
+
+    room.on(RoomEvent.DataReceived, handleDataReceived);
+    return () => {
+      room.off(RoomEvent.DataReceived, handleDataReceived);
+    };
+  }, [room]);
+
+  // 3. Функция переключения доски (Отправляет команду всем)
+  const toggleWhiteboard = () => {
+    const newState = !isWhiteboardOpen;
+    setIsWhiteboardOpen(newState); // Меняем у себя
+    
+    // Если это препод, рассылаем команду всем ученикам
+    if (isHost) {
+      const msg = JSON.stringify({ type: 'WHITEBOARD_TOGGLE', isOpen: newState });
+      const data = new TextEncoder().encode(msg);
+      // Публикуем сообщение в комнату с надежной доставкой (reliable: true)
+      room.localParticipant.publishData(data, { reliable: true });
+    }
+  };
+
+  // Разделяем треки
   const screenTracks = useTracks([Track.Source.ScreenShare], { onlySubscribed: false });
   const cameraTracks = useTracks([Track.Source.Camera], { onlySubscribed: false });
   const hasScreenShare = screenTracks.length > 0;
@@ -199,7 +234,7 @@ function AlveriumStage() {
           {/* ЛОГИКА РЕНДЕРИНГА ЭКРАНА */}
           {isWhiteboardOpen ? (
             <>
-              {/* Показ интерактивной доски (100% экрана) */}
+              {/* Показ интерактивной доски */}
               <div className="absolute inset-0 p-2 md:p-4">
                 <AlveriumWhiteboard isHost={isHost} />
               </div>
@@ -217,7 +252,7 @@ function AlveriumStage() {
             </>
           ) : hasScreenShare ? (
             <>
-              {/* Показ трансляции экрана (100% экрана) */}
+              {/* Показ трансляции экрана */}
               <div className="absolute inset-0 p-2 md:p-4">
                 <GridLayout tracks={screenTracks} style={{ height: '100%', width: '100%' }}>
                   <ParticipantTile />
@@ -259,10 +294,10 @@ function AlveriumStage() {
             <RecordIcon />
           </button>
           
-          {/* КНОПКА ИНТЕРАКТИВНОЙ ДОСКИ (Показываем ТОЛЬКО преподавателю) */}
+          {/* КНОПКА ИНТЕРАКТИВНОЙ ДОСКИ */}
           {isHost && (
             <button 
-              onClick={() => setIsWhiteboardOpen(!isWhiteboardOpen)} 
+              onClick={toggleWhiteboard} // ПРИВЯЗАЛИ НОВУЮ ФУНКЦИЮ
               className={`flex items-center justify-center w-10 h-10 md:w-12 md:h-12 rounded-xl border transition-all duration-300 ${
                 isWhiteboardOpen 
                   ? 'bg-red-800 border-red-600 text-white shadow-[0_0_15px_rgba(153,27,27,0.4)]' 
@@ -311,7 +346,6 @@ function RoomContent() {
   const token = searchParams.get('token');
   const roomUrl = "wss://meet.alverium.ru";
 
-  // Обработка Graceful Exit при отключении
   const handleDisconnect = () => {
     const returnUrl = process.env.NEXT_PUBLIC_LMS_RETURN_URL || '/';
     if (returnUrl.startsWith('http')) {
