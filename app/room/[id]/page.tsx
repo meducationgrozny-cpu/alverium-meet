@@ -1,9 +1,8 @@
 
 
-
 "use client";
 
-import React, { useState, Suspense } from 'react';
+import React, { useState, Suspense, useEffect } from 'react';
 import { useSearchParams, useRouter } from 'next/navigation';
 import '@livekit/components-styles';
 import {
@@ -130,22 +129,34 @@ function AlveriumChat({ isOpen, onClose }: { isOpen: boolean, onClose: () => voi
 function AlveriumStage() {
   const [isChatOpen, setIsChatOpen] = useState(false);
   const [isWhiteboardOpen, setIsWhiteboardOpen] = useState(false);
+  const [isHost, setIsHost] = useState(false); // Дефолтно считаем всех учениками
 
-  // 1. Берем токен из URL
   const searchParams = useSearchParams();
   const token = searchParams.get('token');
-  
-  // 2. Расшифровываем JWT напрямую, чтобы 100% увидеть права, которые дал Турпал
-  let isHost = false;
-  if (token) {
+
+  // Безопасная расшифровка токена с поддержкой кириллицы
+  useEffect(() => {
+    if (!token) return;
     try {
-      const base64Payload = token.split('.')[1].replace(/-/g, '+').replace(/_/g, '/');
-      const payload = JSON.parse(atob(base64Payload));
-      isHost = payload?.video?.roomAdmin === true;
+      const base64Url = token.split('.')[1];
+      if (!base64Url) return;
+      
+      const base64 = base64Url.replace(/-/g, '+').replace(/_/g, '/');
+      const jsonPayload = decodeURIComponent(
+        atob(base64)
+          .split('')
+          .map((c) => '%' + ('00' + c.charCodeAt(0).toString(16)).slice(-2))
+          .join('')
+      );
+      
+      const payload = JSON.parse(jsonPayload);
+      if (payload?.video?.roomAdmin === true) {
+        setIsHost(true);
+      }
     } catch (e) {
-      console.error("Ошибка парсинга токена", e);
+      console.error("Ошибка парсинга токена (возможно кривой формат):", e);
     }
-  }
+  }, [token]);
 
   // Разделяем треки на камеры и трансляции экрана
   const screenTracks = useTracks([Track.Source.ScreenShare], { onlySubscribed: false });
