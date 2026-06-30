@@ -1,6 +1,8 @@
+
+
 "use client";
 
-import { useState, Suspense } from 'react';
+import React, { useState, Suspense } from 'react';
 import { useSearchParams, useRouter } from 'next/navigation';
 import '@livekit/components-styles';
 import {
@@ -11,7 +13,8 @@ import {
   useTracks,
   TrackToggle,
   DisconnectButton,
-  useChat
+  useChat,
+  useLocalParticipant
 } from '@livekit/components-react';
 import { Track } from 'livekit-client';
 
@@ -94,7 +97,9 @@ function AlveriumChat({ isOpen, onClose }: { isOpen: boolean, onClose: () => voi
           ) : (
             chatMessages.map((msg, i) => (
               <div key={i} className="flex flex-col">
-                <span className="text-[10px] text-gray-500 mb-1.5 ml-1 tracking-wide">{msg.from?.name || msg.from?.identity}</span>
+                <span className="text-[10px] text-gray-500 mb-1.5 ml-1 tracking-wide">
+                  {(msg.from as any)?.name || msg.from?.identity || "Гость"}
+                </span>
                 <div className="bg-white/5 text-sm text-gray-200 p-3.5 rounded-2xl rounded-tl-sm border border-white/5 font-light leading-relaxed">
                   {msg.message}
                 </div>
@@ -124,7 +129,11 @@ function AlveriumChat({ isOpen, onClose }: { isOpen: boolean, onClose: () => voi
 // ====================================================
 function AlveriumStage() {
   const [isChatOpen, setIsChatOpen] = useState(false);
-  const [isWhiteboardOpen, setIsWhiteboardOpen] = useState(false); // Стейт для доски
+  const [isWhiteboardOpen, setIsWhiteboardOpen] = useState(false);
+
+  // Получаем данные локального пользователя и жестко обходим типизацию TS для roomAdmin
+  const { localParticipant } = useLocalParticipant();
+  const isHost = (localParticipant?.permissions as any)?.roomAdmin === true;
 
   // Разделяем треки на камеры и трансляции экрана
   const screenTracks = useTracks([Track.Source.ScreenShare], { onlySubscribed: false });
@@ -154,7 +163,7 @@ function AlveriumStage() {
             <>
               {/* Показ интерактивной доски (100% экрана) */}
               <div className="absolute inset-0 p-2 md:p-4">
-                <AlveriumWhiteboard />
+                <AlveriumWhiteboard isHost={isHost} />
               </div>
               
               {/* Плавающее окно с камерами спикеров (PiP) */}
@@ -212,24 +221,28 @@ function AlveriumStage() {
             <RecordIcon />
           </button>
           
-          {/* КНОПКА ИНТЕРАКТИВНОЙ ДОСКИ (Активирует Whiteboard) */}
-          <button 
-            onClick={() => setIsWhiteboardOpen(!isWhiteboardOpen)} 
-            className={`flex items-center justify-center w-10 h-10 md:w-12 md:h-12 rounded-xl border transition-all duration-300 ${
-              isWhiteboardOpen 
-                ? 'bg-red-800 border-red-600 text-white shadow-[0_0_15px_rgba(153,27,27,0.4)]' 
-                : 'bg-white/5 border-white/5 hover:bg-white/10 text-gray-400 hover:text-white'
-            }`}
-            title="Интерактивная доска и PDF"
-          >
-            <PenIcon />
-          </button>
+          {/* КНОПКА ИНТЕРАКТИВНОЙ ДОСКИ (Показываем ТОЛЬКО преподавателю) */}
+          {isHost && (
+            <button 
+              onClick={() => setIsWhiteboardOpen(!isWhiteboardOpen)} 
+              className={`flex items-center justify-center w-10 h-10 md:w-12 md:h-12 rounded-xl border transition-all duration-300 ${
+                isWhiteboardOpen 
+                  ? 'bg-red-800 border-red-600 text-white shadow-[0_0_15px_rgba(153,27,27,0.4)]' 
+                  : 'bg-white/5 border-white/5 hover:bg-white/10 text-gray-400 hover:text-white'
+              }`}
+              title="Интерактивная доска и PDF"
+            >
+              <PenIcon />
+            </button>
+          )}
         </div>
         
         <div className="flex items-center gap-1 md:gap-2 bg-[#0a0a0a] px-2 py-1.5 md:px-3 md:py-2 rounded-2xl border border-white/5 shadow-2xl">
           <TrackToggle source={Track.Source.Microphone} className="!bg-transparent hover:!bg-white/10 !text-gray-300 hover:!text-white !border-none !rounded-xl transition-all !w-10 !h-10 md:!w-12" />
           <TrackToggle source={Track.Source.Camera} className="!bg-transparent hover:!bg-white/10 !text-gray-300 hover:!text-white !border-none !rounded-xl transition-all !w-10 !h-10 md:!w-12" />
-          <TrackToggle source={Track.Source.ScreenShare} className="!bg-transparent hover:!bg-white/10 !text-gray-300 hover:!text-white !border-none !rounded-xl transition-all !w-10 !h-10 md:!w-12" />
+          {isHost && (
+            <TrackToggle source={Track.Source.ScreenShare} className="!bg-transparent hover:!bg-white/10 !text-gray-300 hover:!text-white !border-none !rounded-xl transition-all !w-10 !h-10 md:!w-12" />
+          )}
           
           <div className="w-[1px] h-6 bg-white/10 mx-1 md:mx-2"></div>
           

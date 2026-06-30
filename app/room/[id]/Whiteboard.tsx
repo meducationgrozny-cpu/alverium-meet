@@ -3,7 +3,7 @@
 import React, { useState, useRef } from 'react';
 import { Document, Page, pdfjs } from 'react-pdf';
 
-// Настраиваем воркер для Next.js (используем CDN, чтобы не было конфликтов с Turbopack)
+// Настраиваем воркер для Next.js
 pdfjs.GlobalWorkerOptions.workerSrc = `//unpkg.com/pdfjs-dist@${pdfjs.version}/build/pdf.worker.min.mjs`;
 
 // ====================================================
@@ -33,7 +33,12 @@ const UploadIcon = () => (
   </svg>
 );
 
-export default function AlveriumWhiteboard() {
+// Добавляем интерфейс для пропсов
+interface WhiteboardProps {
+  isHost: boolean;
+}
+
+export default function AlveriumWhiteboard({ isHost }: WhiteboardProps) {
   const [pdfFile, setPdfFile] = useState<string | null>(null);
   const [numPages, setNumPages] = useState<number>(1);
   const [pageNumber, setPageNumber] = useState<number>(1);
@@ -41,7 +46,6 @@ export default function AlveriumWhiteboard() {
   
   const fileInputRef = useRef<HTMLInputElement>(null);
 
-  // Обработчик загрузки локального PDF
   const onFileChange = (event: React.ChangeEvent<HTMLInputElement>) => {
     const file = event.target.files?.[0];
     if (file && file.type === 'application/pdf') {
@@ -58,60 +62,68 @@ export default function AlveriumWhiteboard() {
   return (
     <div className="relative w-full h-full flex bg-[#0a0a0a] overflow-hidden rounded-xl border border-white/5">
       
-      {/* ЛЕВАЯ ПАНЕЛЬ ИНСТРУМЕНТОВ (Тулбар как на скетче) */}
-      <div className="absolute left-4 top-1/2 -translate-y-1/2 z-50 flex flex-col gap-3 bg-[#050505]/90 backdrop-blur-xl p-2 rounded-2xl border border-white/10 shadow-2xl">
-        <button 
-          onClick={() => setActiveTool('cursor')}
-          className={`p-3 rounded-xl transition-all ${activeTool === 'cursor' ? 'bg-red-800 text-white shadow-[0_0_15px_rgba(153,27,27,0.4)]' : 'text-gray-400 hover:bg-white/10 hover:text-white'}`}
-          title="Указатель (Скролл)"
-        >
-          <CursorIcon />
-        </button>
-        <button 
-          onClick={() => setActiveTool('pen')}
-          className={`p-3 rounded-xl transition-all ${activeTool === 'pen' ? 'bg-red-800 text-white shadow-[0_0_15px_rgba(153,27,27,0.4)]' : 'text-gray-400 hover:bg-white/10 hover:text-white'}`}
-          title="Ручка"
-        >
-          <PenIcon />
-        </button>
-        <button 
-          onClick={() => setActiveTool('eraser')}
-          className={`p-3 rounded-xl transition-all ${activeTool === 'eraser' ? 'bg-red-800 text-white shadow-[0_0_15px_rgba(153,27,27,0.4)]' : 'text-gray-400 hover:bg-white/10 hover:text-white'}`}
-          title="Ластик"
-        >
-          <EraserIcon />
-        </button>
-        
-        <div className="w-full h-[1px] bg-white/10 my-1"></div>
-        
-        <button 
-          onClick={() => fileInputRef.current?.click()}
-          className="p-3 rounded-xl text-gray-400 hover:bg-white/10 hover:text-white transition-all"
-          title="Загрузить PDF"
-        >
-          <UploadIcon />
-        </button>
-        <input 
-          type="file" 
-          accept="application/pdf" 
-          ref={fileInputRef} 
-          onChange={onFileChange} 
-          className="hidden" 
-        />
-      </div>
+      {/* ЛЕВАЯ ПАНЕЛЬ ИНСТРУМЕНТОВ (Показываем ТОЛЬКО преподавателю) */}
+      {isHost && (
+        <div className="absolute left-4 top-1/2 -translate-y-1/2 z-50 flex flex-col gap-3 bg-[#050505]/90 backdrop-blur-xl p-2 rounded-2xl border border-white/10 shadow-2xl">
+          <button 
+            onClick={() => setActiveTool('cursor')}
+            className={`p-3 rounded-xl transition-all ${activeTool === 'cursor' ? 'bg-red-800 text-white shadow-[0_0_15px_rgba(153,27,27,0.4)]' : 'text-gray-400 hover:bg-white/10 hover:text-white'}`}
+            title="Указатель (Скролл)"
+          >
+            <CursorIcon />
+          </button>
+          <button 
+            onClick={() => setActiveTool('pen')}
+            className={`p-3 rounded-xl transition-all ${activeTool === 'pen' ? 'bg-red-800 text-white shadow-[0_0_15px_rgba(153,27,27,0.4)]' : 'text-gray-400 hover:bg-white/10 hover:text-white'}`}
+            title="Ручка"
+          >
+            <PenIcon />
+          </button>
+          <button 
+            onClick={() => setActiveTool('eraser')}
+            className={`p-3 rounded-xl transition-all ${activeTool === 'eraser' ? 'bg-red-800 text-white shadow-[0_0_15px_rgba(153,27,27,0.4)]' : 'text-gray-400 hover:bg-white/10 hover:text-white'}`}
+            title="Ластик"
+          >
+            <EraserIcon />
+          </button>
+          
+          <div className="w-full h-[1px] bg-white/10 my-1"></div>
+          
+          <button 
+            onClick={() => fileInputRef.current?.click()}
+            className="p-3 rounded-xl text-gray-400 hover:bg-white/10 hover:text-white transition-all"
+            title="Загрузить PDF"
+          >
+            <UploadIcon />
+          </button>
+          <input 
+            type="file" 
+            accept="application/pdf" 
+            ref={fileInputRef} 
+            onChange={onFileChange} 
+            className="hidden" 
+          />
+        </div>
+      )}
 
-      {/* ЦЕНТРАЛЬНАЯ ОБЛАСТЬ (Холст и PDF) */}
+      {/* ЦЕНТРАЛЬНАЯ ОБЛАСТЬ */}
       <div className="flex-1 w-full h-full flex items-center justify-center relative overflow-auto custom-scrollbar">
         {!pdfFile ? (
           <div className="flex flex-col items-center justify-center text-gray-500 gap-4">
-            <UploadIcon />
-            <p className="font-light tracking-wide text-sm">Загрузите PDF для начала урока</p>
-            <button 
-              onClick={() => fileInputRef.current?.click()}
-              className="mt-2 px-6 py-2 bg-white/5 hover:bg-white/10 border border-white/10 rounded-lg text-xs font-medium text-white transition-all"
-            >
-              Выбрать файл
-            </button>
+            {isHost ? (
+              <>
+                <UploadIcon />
+                <p className="font-light tracking-wide text-sm">Загрузите PDF для начала урока</p>
+                <button 
+                  onClick={() => fileInputRef.current?.click()}
+                  className="mt-2 px-6 py-2 bg-white/5 hover:bg-white/10 border border-white/10 rounded-lg text-xs font-medium text-white transition-all"
+                >
+                  Выбрать файл
+                </button>
+              </>
+            ) : (
+              <p className="font-light tracking-wide text-sm animate-pulse">Ожидаем презентацию преподавателя...</p>
+            )}
           </div>
         ) : (
           <div className="relative shadow-2xl transition-all duration-300">
@@ -126,11 +138,9 @@ export default function AlveriumWhiteboard() {
                 renderTextLayer={false}
                 renderAnnotationLayer={false}
                 className="rounded-md overflow-hidden"
-                width={800} // Базовая ширина, позже сделаем адаптивной
+                width={800}
               />
             </Document>
-
-            {/* ПРОЗРАЧНЫЙ КАНВАС ДЛЯ РИСОВАНИЯ (Наложим его поверх PDF на следующем шаге) */}
             <div className={`absolute inset-0 z-10 ${activeTool === 'cursor' ? 'pointer-events-none' : 'cursor-crosshair'}`}>
               {/* Тут будет perfect-freehand */}
             </div>
@@ -138,11 +148,11 @@ export default function AlveriumWhiteboard() {
         )}
       </div>
 
-      {/* ПАНЕЛЬ ПАГИНАЦИИ (Снизу по центру) */}
+      {/* ПАНЕЛЬ ПАГИНАЦИИ */}
       {pdfFile && (
         <div className="absolute bottom-6 left-1/2 -translate-x-1/2 z-50 flex items-center gap-4 bg-[#050505]/90 backdrop-blur-xl px-4 py-2 rounded-full border border-white/10 shadow-2xl">
           <button 
-            disabled={pageNumber <= 1}
+            disabled={!isHost || pageNumber <= 1}
             onClick={() => setPageNumber(p => p - 1)}
             className="text-gray-400 hover:text-white disabled:opacity-30 disabled:hover:text-gray-400 font-bold px-2 transition-all"
           >
@@ -152,7 +162,7 @@ export default function AlveriumWhiteboard() {
             {pageNumber} <span className="text-gray-600">/</span> {numPages}
           </span>
           <button 
-            disabled={pageNumber >= numPages}
+            disabled={!isHost || pageNumber >= numPages}
             onClick={() => setPageNumber(p => p + 1)}
             className="text-gray-400 hover:text-white disabled:opacity-30 disabled:hover:text-gray-400 font-bold px-2 transition-all"
           >
