@@ -1,5 +1,6 @@
 
 
+
 "use client";
 
 import React, { useState, Suspense, useEffect } from 'react';
@@ -21,6 +22,36 @@ import { Track } from 'livekit-client';
 import AlveriumWhiteboard from './Whiteboard';
 
 // ====================================================
+// БЕЗОПАСНЫЙ ПАРСЕР JWT ТОКЕНА
+// ====================================================
+function parseJwtAdmin(token: string | null) {
+  if (!token) return false;
+  try {
+    const base64Url = token.split('.')[1];
+    if (!base64Url) return false;
+    const base64 = base64Url.replace(/-/g, '+').replace(/_/g, '/');
+    
+    // Метод 1: Безопасный парсинг с поддержкой кириллицы (UTF-8)
+    const jsonPayload = decodeURIComponent(
+      atob(base64)
+        .split('')
+        .map((c) => '%' + ('00' + c.charCodeAt(0).toString(16)).slice(-2))
+        .join('')
+    );
+    const payload = JSON.parse(jsonPayload);
+    return payload?.video?.roomAdmin === true;
+  } catch (e) {
+    // Метод 2: Классический парсинг (фоллбэк, если первый метод не сработал)
+    try {
+      const payload = JSON.parse(atob(token.split('.')[1]));
+      return payload?.video?.roomAdmin === true;
+    } catch (e2) {
+      return false; // Если токен совсем сломан, отдаем права ученика
+    }
+  }
+}
+
+// ====================================================
 // ПРЕМИУМ SVG ИКОНКИ
 // ====================================================
 const SettingsIcon = () => (
@@ -37,7 +68,6 @@ const RecordIcon = () => (
   </svg>
 );
 
-// Иконка Ручки для активации Интерактивной доски
 const PenIcon = () => (
   <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" className="w-5 h-5">
     <path strokeLinecap="round" strokeLinejoin="round" d="M16.862 4.487l1.687-1.688a1.875 1.875 0 112.652 2.652L6.832 19.82a4.5 4.5 0 01-1.89 1.12l-2.827.942a.375.375 0 01-.475-.475l.942-2.827a4.5 4.5 0 011.12-1.89l13.13-13.132z" />
@@ -134,28 +164,9 @@ function AlveriumStage() {
   const searchParams = useSearchParams();
   const token = searchParams.get('token');
 
-  // Безопасная расшифровка токена с поддержкой кириллицы
+  // Безопасно проверяем токен после загрузки компонента, чтобы не сломать SSR
   useEffect(() => {
-    if (!token) return;
-    try {
-      const base64Url = token.split('.')[1];
-      if (!base64Url) return;
-      
-      const base64 = base64Url.replace(/-/g, '+').replace(/_/g, '/');
-      const jsonPayload = decodeURIComponent(
-        atob(base64)
-          .split('')
-          .map((c) => '%' + ('00' + c.charCodeAt(0).toString(16)).slice(-2))
-          .join('')
-      );
-      
-      const payload = JSON.parse(jsonPayload);
-      if (payload?.video?.roomAdmin === true) {
-        setIsHost(true);
-      }
-    } catch (e) {
-      console.error("Ошибка парсинга токена (возможно кривой формат):", e);
-    }
+    setIsHost(parseJwtAdmin(token));
   }, [token]);
 
   // Разделяем треки на камеры и трансляции экрана
