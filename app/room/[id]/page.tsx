@@ -374,7 +374,7 @@ function AlveriumStage() {
       const chunk = blob.slice(start, end);
 
       const fd = new FormData();
-      fd.append('file', chunk);
+      fd.append('file', chunk, filename);
       fd.append('filename', filename);
       fd.append('chunkIndex', String(i));
       fd.append('totalChunks', String(totalChunks));
