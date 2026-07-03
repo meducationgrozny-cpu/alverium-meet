@@ -6,9 +6,9 @@ import { RoomEvent } from 'livekit-client';
 import * as pdfjsLib from 'pdfjs-dist';
 import { PDFDocument } from 'pdf-lib';
 
+// Используем самый стабильный CDN для воркера (Cloudflare) с обязательным .mjs
 if (typeof window !== 'undefined') {
-  // Надежный CDN jsdelivr с поддержкой .mjs модулей для 5-й версии
-  pdfjsLib.GlobalWorkerOptions.workerSrc = `https://cdn.jsdelivr.net/npm/pdfjs-dist@${pdfjsLib.version}/build/pdf.worker.min.mjs`;
+  pdfjsLib.GlobalWorkerOptions.workerSrc = `https://cdnjs.cloudflare.com/ajax/libs/pdf.js/${pdfjsLib.version}/pdf.worker.min.mjs`;
 }
 
 interface Point { x: number; y: number; }
@@ -22,12 +22,12 @@ export default function AlveriumWhiteboard({ isHost }: { isHost: boolean }) {
   
   const VIRTUAL_W = 1920;
   const VIRTUAL_H = 1080;
+  const ROOM_KEY = `alverium_wb_${room.name}`;
 
   const [currentPage, setCurrentPage] = useState(1);
   const [totalPages, setTotalPages] = useState(1);
   const [isDrawing, setIsDrawing] = useState(false);
   const [uploadProgress, setUploadProgress] = useState(0);
-  
   const [renderTrigger, setRenderTrigger] = useState(0);
 
   const linesMap = useRef<Record<number, Line[]>>({});
@@ -36,6 +36,30 @@ export default function AlveriumWhiteboard({ isHost }: { isHost: boolean }) {
   const pdfDocRef = useRef<pdfjsLib.PDFDocumentProxy | null>(null);
   const pdfBytesRef = useRef<ArrayBuffer | null>(null);
 
+  // Восстановление рисунков после обновления страницы
+  useEffect(() => {
+    const saved = localStorage.getItem(ROOM_KEY);
+    if (saved) {
+      try { linesMap.current = JSON.parse(saved); } catch(e) {}
+    }
+  }, [ROOM_KEY]);
+
+  const saveToLocal = () => {
+    localStorage.setItem(ROOM_KEY, JSON.stringify(linesMap.current));
+  };
+
+  // Защита от случайного закрытия вкладки
+  useEffect(() => {
+    const handleUnload = (e: BeforeUnloadEvent) => {
+      if (isHost && (totalPages > 1 || Object.keys(linesMap.current).length > 0)) {
+        e.preventDefault();
+        e.returnValue = 'У вас есть несохраненные изменения. Точно хотите выйти?';
+      }
+    };
+    window.addEventListener('beforeunload', handleUnload);
+    return () => window.removeEventListener('beforeunload', handleUnload);
+  }, [isHost, totalPages]);
+
   useEffect(() => {
     const handleData = (payload: Uint8Array) => {
       try {
@@ -43,11 +67,13 @@ export default function AlveriumWhiteboard({ isHost }: { isHost: boolean }) {
         if (msg.type === 'WB_DRAW') {
           if (!linesMap.current[msg.page]) linesMap.current[msg.page] = [];
           linesMap.current[msg.page].push(msg.line);
+          saveToLocal();
           if (msg.page === currentPage) drawAllLines(msg.page);
         } else if (msg.type === 'WB_PAGE') {
           setCurrentPage(msg.page);
         } else if (msg.type === 'WB_CLEAR') {
           linesMap.current[msg.page] = [];
+          saveToLocal();
           if (msg.page === currentPage) drawAllLines(msg.page);
         }
       } catch (e) {}
@@ -63,18 +89,22 @@ export default function AlveriumWhiteboard({ isHost }: { isHost: boolean }) {
 
   const renderPdfPage = async (pageNum: number) => {
     if (!pdfDocRef.current || !bgCanvasRef.current) return;
-    const page = await pdfDocRef.current.getPage(pageNum);
-    const viewport = page.getViewport({ scale: 2.0 });
-    
-    const canvas = bgCanvasRef.current;
-    const ctx = canvas.getContext('2d');
-    if (!ctx) return;
+    try {
+      const page = await pdfDocRef.current.getPage(pageNum);
+      const viewport = page.getViewport({ scale: 2.0 });
+      
+      const canvas = bgCanvasRef.current;
+      const ctx = canvas.getContext('2d');
+      if (!ctx) return;
 
-    ctx.fillStyle = '#ffffff';
-    ctx.fillRect(0, 0, VIRTUAL_W, VIRTUAL_H);
+      ctx.fillStyle = '#ffffff';
+      ctx.fillRect(0, 0, VIRTUAL_W, VIRTUAL_H);
 
-    const renderContext: any = { canvasContext: ctx, viewport: viewport };
-    await page.render(renderContext).promise;
+      const renderContext: any = { canvasContext: ctx, viewport: viewport };
+      await page.render(renderContext).promise;
+    } catch (err) {
+      console.error("Ошибка рендера страницы:", err);
+    }
   };
 
   const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -95,7 +125,7 @@ export default function AlveriumWhiteboard({ isHost }: { isHost: boolean }) {
         setRenderTrigger(prev => prev + 1);
         broadcast({ type: 'WB_PAGE', page: 1 });
     } catch (err) {
-        alert("Ошибка чтения PDF файла: " + err);
+        alert("Сбросьте кэш браузера (Ctrl+F5). Ошибка: " + err);
     }
   };
 
@@ -129,6 +159,7 @@ export default function AlveriumWhiteboard({ isHost }: { isHost: boolean }) {
     
     if (!linesMap.current[currentPage]) linesMap.current[currentPage] = [];
     linesMap.current[currentPage].push(currentLine.current);
+    saveToLocal();
     
     broadcast({ type: 'WB_DRAW', page: currentPage, line: currentLine.current });
     currentLine.current = null;
@@ -162,6 +193,7 @@ export default function AlveriumWhiteboard({ isHost }: { isHost: boolean }) {
 
   const clearPage = () => {
     linesMap.current[currentPage] = [];
+    saveToLocal();
     drawAllLines(currentPage);
     broadcast({ type: 'WB_CLEAR', page: currentPage });
   };
@@ -276,6 +308,8 @@ export default function AlveriumWhiteboard({ isHost }: { isHost: boolean }) {
       }
     }
     alert(`Конспект успешно сохранен в VOD консоли как ${filename}!`);
+    // Очищаем память после успешной выгрузки
+    localStorage.removeItem(ROOM_KEY);
     setUploadProgress(0);
   };
 
@@ -302,7 +336,8 @@ export default function AlveriumWhiteboard({ isHost }: { isHost: boolean }) {
       )}
 
       <div ref={containerRef} className="flex-1 w-full h-full p-4 flex items-center justify-center relative touch-none">
-        <div className="relative shadow-2xl bg-white" style={{ aspectRatio: '16/9', maxHeight: '100%', maxWidth: '100%' }}>
+        {/* ЖЕСТКАЯ ФИКСАЦИЯ БЕЛОГО ФОНА И РАЗМЕРОВ */}
+        <div className="relative shadow-2xl bg-white w-full max-w-full mx-auto flex-shrink-0" style={{ aspectRatio: '16/9', maxHeight: '100%' }}>
           <canvas ref={bgCanvasRef} width={VIRTUAL_W} height={VIRTUAL_H} className="absolute inset-0 w-full h-full object-contain pointer-events-none rounded-lg" />
           <canvas
             ref={drawCanvasRef}
