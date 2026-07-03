@@ -6,9 +6,9 @@ import { RoomEvent } from 'livekit-client';
 import * as pdfjsLib from 'pdfjs-dist';
 import { PDFDocument } from 'pdf-lib';
 
-// Используем самый стабильный CDN для воркера (Cloudflare) с обязательным .mjs
+// Возвращаем классический стабильный .js воркер для 3-й версии
 if (typeof window !== 'undefined') {
-  pdfjsLib.GlobalWorkerOptions.workerSrc = `https://cdnjs.cloudflare.com/ajax/libs/pdf.js/${pdfjsLib.version}/pdf.worker.min.mjs`;
+  pdfjsLib.GlobalWorkerOptions.workerSrc = `https://cdnjs.cloudflare.com/ajax/libs/pdf.js/${pdfjsLib.version}/pdf.worker.min.js`;
 }
 
 interface Point { x: number; y: number; }
@@ -36,7 +36,6 @@ export default function AlveriumWhiteboard({ isHost }: { isHost: boolean }) {
   const pdfDocRef = useRef<pdfjsLib.PDFDocumentProxy | null>(null);
   const pdfBytesRef = useRef<ArrayBuffer | null>(null);
 
-  // Восстановление рисунков после обновления страницы
   useEffect(() => {
     const saved = localStorage.getItem(ROOM_KEY);
     if (saved) {
@@ -48,7 +47,6 @@ export default function AlveriumWhiteboard({ isHost }: { isHost: boolean }) {
     localStorage.setItem(ROOM_KEY, JSON.stringify(linesMap.current));
   };
 
-  // Защита от случайного закрытия вкладки
   useEffect(() => {
     const handleUnload = (e: BeforeUnloadEvent) => {
       if (isHost && (totalPages > 1 || Object.keys(linesMap.current).length > 0)) {
@@ -125,7 +123,7 @@ export default function AlveriumWhiteboard({ isHost }: { isHost: boolean }) {
         setRenderTrigger(prev => prev + 1);
         broadcast({ type: 'WB_PAGE', page: 1 });
     } catch (err) {
-        alert("Сбросьте кэш браузера (Ctrl+F5). Ошибка: " + err);
+        alert("Ошибка чтения PDF. Убедитесь, что файл не поврежден: " + err);
     }
   };
 
@@ -308,7 +306,6 @@ export default function AlveriumWhiteboard({ isHost }: { isHost: boolean }) {
       }
     }
     alert(`Конспект успешно сохранен в VOD консоли как ${filename}!`);
-    // Очищаем память после успешной выгрузки
     localStorage.removeItem(ROOM_KEY);
     setUploadProgress(0);
   };
@@ -336,7 +333,6 @@ export default function AlveriumWhiteboard({ isHost }: { isHost: boolean }) {
       )}
 
       <div ref={containerRef} className="flex-1 w-full h-full p-4 flex items-center justify-center relative touch-none">
-        {/* ЖЕСТКАЯ ФИКСАЦИЯ БЕЛОГО ФОНА И РАЗМЕРОВ */}
         <div className="relative shadow-2xl bg-white w-full max-w-full mx-auto flex-shrink-0" style={{ aspectRatio: '16/9', maxHeight: '100%' }}>
           <canvas ref={bgCanvasRef} width={VIRTUAL_W} height={VIRTUAL_H} className="absolute inset-0 w-full h-full object-contain pointer-events-none rounded-lg" />
           <canvas
