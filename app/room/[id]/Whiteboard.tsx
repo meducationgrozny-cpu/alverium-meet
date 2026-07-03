@@ -132,7 +132,7 @@ export default function AlveriumWhiteboard({ isHost }: { isHost: boolean }) {
         setRenderTrigger(prev => prev + 1);
         broadcast({ type: 'WB_PAGE', page: 1 });
     } catch (err) {
-        alert("Ошибка чтения PDF: " + err);
+        alert("Ошибка чтения PDF. Убедитесь, что файл не поврежден: " + err);
     }
   };
 
@@ -303,7 +303,9 @@ export default function AlveriumWhiteboard({ isHost }: { isHost: boolean }) {
       fd.append('filename', filename);
       fd.append('chunkIndex', String(i));
       fd.append('totalChunks', String(totalChunks));
-      fd.append('folder', 'common');
+      
+      // ИСПРАВЛЕНИЕ: Выгружаем напрямую в папку 'notes' (Конспекты)
+      fd.append('folder', 'notes');
 
       try {
         await fetch('https://video.alverium.ru/upload_chunk', { method: 'POST', body: fd });
@@ -314,49 +316,80 @@ export default function AlveriumWhiteboard({ isHost }: { isHost: boolean }) {
         return;
       }
     }
-    alert(`Конспект успешно сохранен в VOD консоли как ${filename}!`);
+    alert(`Конспект успешно сохранен в VOD консоли (Папка Конспекты) как ${filename}!`);
     localStorage.removeItem(ROOM_KEY);
     setUploadProgress(0);
   };
 
   return (
-    <div className="relative w-full h-full min-h-[350px] md:min-h-0 bg-[#1a1a1a] flex flex-col rounded-xl overflow-hidden shadow-2xl">
-      {isHost && (
-        <div className="absolute top-4 left-1/2 -translate-x-1/2 z-30 flex items-center gap-4 bg-black/80 backdrop-blur-md px-4 py-2 rounded-2xl border border-white/10 shadow-2xl">
-          <label className="cursor-pointer bg-white/10 hover:bg-white/20 text-white text-xs font-bold px-3 py-1.5 rounded-lg transition-all">
-            + PDF
-            <input type="file" accept="application/pdf" className="hidden" onChange={handleFileUpload} />
-          </label>
-          
-          <div className="flex items-center gap-2 text-gray-300 font-mono text-sm">
-            <button disabled={currentPage <= 1} onClick={() => { setCurrentPage(p => p - 1); broadcast({ type: 'WB_PAGE', page: currentPage - 1 }); }} className="px-2 hover:text-white disabled:opacity-50">◀</button>
-            <span>{currentPage} / {totalPages}</span>
-            <button disabled={currentPage >= totalPages} onClick={() => { setCurrentPage(p => p + 1); broadcast({ type: 'WB_PAGE', page: currentPage + 1 }); }} className="px-2 hover:text-white disabled:opacity-50">▶</button>
+    <>
+      {/* ГЛОБАЛЬНЫЕ CSS-ФИКСЫ ДЛЯ LIVEKIT И МОБИЛЬНЫХ УСТРОЙСТВ */}
+      <style dangerouslySetInnerHTML={{__html: `
+        /* Убираем "челку", показываем всё видео без обрезки */
+        .lk-participant-tile video {
+          object-fit: contain !important;
+          background-color: #000;
+        }
+        
+        /* Заставляем LiveKit на мобилках делить экран пополам: сверху доска, снизу видео */
+        @media (max-width: 768px) {
+          .lk-video-conference {
+            flex-direction: column !important;
+          }
+          .lk-video-conference > .lk-participant-grid {
+            height: 35vh !important;
+            flex: none !important;
+            order: 2;
+          }
+          /* Контейнер доски на телефоне */
+          .mobile-wb-wrapper {
+            height: 55vh !important;
+            flex: none !important;
+            order: 1;
+            z-index: 50;
+            width: 100%;
+          }
+        }
+      `}} />
+
+      <div className="mobile-wb-wrapper relative w-full h-full min-h-[350px] md:min-h-0 bg-[#1a1a1a] flex flex-col rounded-xl overflow-hidden shadow-2xl">
+        {isHost && (
+          <div className="absolute top-4 left-1/2 -translate-x-1/2 z-30 flex items-center gap-4 bg-black/80 backdrop-blur-md px-4 py-2 rounded-2xl border border-white/10 shadow-2xl">
+            <label className="cursor-pointer bg-white/10 hover:bg-white/20 text-white text-xs font-bold px-3 py-1.5 rounded-lg transition-all">
+              + PDF
+              <input type="file" accept="application/pdf" className="hidden" onChange={handleFileUpload} />
+            </label>
+            
+            <div className="flex items-center gap-2 text-gray-300 font-mono text-sm">
+              <button disabled={currentPage <= 1} onClick={() => { setCurrentPage(p => p - 1); broadcast({ type: 'WB_PAGE', page: currentPage - 1 }); }} className="px-2 hover:text-white disabled:opacity-50">◀</button>
+              <span>{currentPage} / {totalPages}</span>
+              <button disabled={currentPage >= totalPages} onClick={() => { setCurrentPage(p => p + 1); broadcast({ type: 'WB_PAGE', page: currentPage + 1 }); }} className="px-2 hover:text-white disabled:opacity-50">▶</button>
+            </div>
+
+            <button onClick={clearPage} className="text-red-400 hover:text-red-300 text-xs font-bold px-2 uppercase transition-colors">Очистить</button>
+            <button onClick={saveAndUploadNotes} className="bg-red-800 hover:bg-red-700 text-white text-xs font-bold px-3 py-1.5 rounded-lg shadow-[0_0_10px_rgba(153,27,27,0.5)] transition-all">
+              {uploadProgress > 0 ? `Сохранение: ${uploadProgress}%` : '💾 В LMS'}
+            </button>
           </div>
+        )}
 
-          <button onClick={clearPage} className="text-red-400 hover:text-red-300 text-xs font-bold px-2 uppercase transition-colors">Очистить</button>
-          <button onClick={saveAndUploadNotes} className="bg-red-800 hover:bg-red-700 text-white text-xs font-bold px-3 py-1.5 rounded-lg shadow-[0_0_10px_rgba(153,27,27,0.5)] transition-all">
-            {uploadProgress > 0 ? `Сохранение: ${uploadProgress}%` : '💾 В LMS'}
-          </button>
-        </div>
-      )}
-
-      <div ref={containerRef} className="flex-1 w-full h-full p-2 sm:p-4 flex items-center justify-center relative touch-none">
-        <div className="relative shadow-2xl bg-white w-full aspect-video max-w-full max-h-full mx-auto flex-shrink-0 rounded-lg overflow-hidden">
-          <canvas ref={bgCanvasRef} width={VIRTUAL_W} height={VIRTUAL_H} className="absolute inset-0 w-full h-full object-contain pointer-events-none" />
-          <canvas
-            ref={drawCanvasRef}
-            width={VIRTUAL_W}
-            height={VIRTUAL_H}
-            onPointerDown={onPointerDown}
-            onPointerMove={onPointerMove}
-            onPointerUp={onPointerUp}
-            onPointerOut={onPointerUp}
-            className={`absolute inset-0 w-full h-full object-contain ${isHost ? 'cursor-crosshair' : 'pointer-events-none'}`}
-            style={{ touchAction: 'none' }}
-          />
+        <div ref={containerRef} className="flex-1 w-full h-full p-2 sm:p-4 flex items-center justify-center relative touch-none">
+          <div className="relative shadow-2xl bg-white w-full aspect-video max-w-full max-h-full mx-auto flex-shrink-0 rounded-lg overflow-hidden">
+            <canvas ref={bgCanvasRef} width={VIRTUAL_W} height={VIRTUAL_H} className="absolute inset-0 w-full h-full object-contain pointer-events-none" />
+            <canvas
+              ref={drawCanvasRef}
+              width={VIRTUAL_W}
+              height={VIRTUAL_H}
+              onPointerDown={onPointerDown}
+              onPointerMove={onPointerMove}
+              onPointerUp={onPointerUp}
+              onPointerOut={onPointerUp}
+              className={`absolute inset-0 w-full h-full object-contain ${isHost ? 'cursor-crosshair' : 'pointer-events-none'}`}
+              style={{ touchAction: 'none' }}
+            />
+          </div>
         </div>
       </div>
-    </div>
+    </>
   );
 }
