@@ -80,6 +80,8 @@ export default function AlveriumWhiteboard({ isHost }: { isHost: boolean }) {
 
     // Центрируем PDF на виртуальном холсте
     const renderContext = { canvasContext: ctx, viewport: viewport };
+    // @ts-ignore
+    renderContext.canvas = canvas;
     await page.render(renderContext).promise;
   };
 
