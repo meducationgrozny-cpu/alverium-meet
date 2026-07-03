@@ -18,7 +18,7 @@ import {
 } from '@livekit/components-react';
 import { Track, RoomEvent } from 'livekit-client';
 
-const AlveriumWhiteboard = dynamic(() => import('./Whiteboard'), { 
+const AlveriumWhiteboard = dynamic(() => import('./Whiteboard'), {
   ssr: false,
   loading: () => <div className="text-gray-500 font-light text-xs animate-pulse p-4">Загрузка доски...</div>
 });
@@ -59,9 +59,8 @@ const CloseIcon = () => (<svg viewBox="0 0 24 24" fill="none" stroke="currentCol
 const MuteIcon = () => (<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" className="w-4 h-4"><path strokeLinecap="round" strokeLinejoin="round" d="M12 18.75a6 6 0 006-6v-1.5m-6 7.5a6 6 0 01-6-6v-1.5m6 7.5v3.75m-3.75 0h7.5M12 15.75a3 3 0 01-3-3V4.5a3 3 0 116 0v8.25a3 3 0 01-3 3z" /><line x1="3" y1="3" x2="21" y2="21" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round"/></svg>);
 const KickIcon = () => (<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" className="w-4 h-4"><path strokeLinecap="round" strokeLinejoin="round" d="M15.75 9V5.25A2.25 2.25 0 0013.5 3h-6a2.25 2.25 0 00-2.25 2.25v13.5A2.25 2.25 0 007.5 21h6a2.25 2.25 0 002.25-2.25V15M12 9l-3 3m0 0l3 3m-3-3h12.75" /></svg>);
 
-
 // ====================================================
-// ИНТЕРАКТИВНЫЙ ХОЛСТ ПОВЕРХ ТРАНСЛЯЦИИ ЭКРАНА (ZOOM KILLER)
+// ИНТЕРАКТИВНЫЙ ХОЛСТ ПОВЕРХ ТРАНСЛЯЦИИ ЭКРАНА
 // ====================================================
 function ScreenShareWrapper({ tracks, isHost, room }: { tracks: any[], isHost: boolean, room: any }) {
   const containerRef = useRef<HTMLDivElement>(null);
@@ -104,7 +103,7 @@ function ScreenShareWrapper({ tracks, isHost, room }: { tracks: any[], isHost: b
       }
     };
     window.addEventListener('resize', handleResize);
-    setTimeout(handleResize, 100); 
+    setTimeout(handleResize, 100);
     return () => window.removeEventListener('resize', handleResize);
   }, []);
 
@@ -113,7 +112,7 @@ function ScreenShareWrapper({ tracks, isHost, room }: { tracks: any[], isHost: b
       try {
         const msg = JSON.parse(new TextDecoder().decode(payload));
         if (msg.type !== 'SCREEN_DRAW') return;
-        
+
         if (msg.action === 'clear') {
           clearCanvas();
         } else if (msg.action === 'line' && canvasRef.current) {
@@ -146,7 +145,7 @@ function ScreenShareWrapper({ tracks, isHost, room }: { tracks: any[], isHost: b
 
     const msg = JSON.stringify({ type: 'SCREEN_DRAW', action: 'line', x0: lastPos.current.x, y0: lastPos.current.y, x1: x, y1: y, color: '#ef4444' });
     room.localParticipant.publishData(new TextEncoder().encode(msg), { reliable: true });
-    
+
     lastPos.current = {x, y};
   };
 
@@ -163,7 +162,7 @@ function ScreenShareWrapper({ tracks, isHost, room }: { tracks: any[], isHost: b
       <GridLayout tracks={tracks} style={{ height: '100%', width: '100%' }}>
         <ParticipantTile />
       </GridLayout>
-      
+
       <canvas
         ref={canvasRef}
         onPointerDown={onPointerDown}
@@ -173,7 +172,7 @@ function ScreenShareWrapper({ tracks, isHost, room }: { tracks: any[], isHost: b
         className={`absolute inset-0 z-10 w-full h-full ${isDrawingMode ? 'cursor-crosshair' : 'pointer-events-none'}`}
         style={{ touchAction: 'none' }}
       />
-      
+
       {isHost && (
         <div className="absolute top-4 left-1/2 -translate-x-1/2 z-20 flex gap-2 bg-black/80 backdrop-blur-md p-1.5 rounded-xl border border-white/10 shadow-2xl transition-all">
           <button onClick={() => setIsDrawingMode(!isDrawingMode)} className={`px-4 py-2 rounded-lg text-xs font-bold uppercase tracking-wider transition-all ${isDrawingMode ? 'bg-red-800 text-white shadow-[0_0_15px_rgba(153,27,27,0.5)]' : 'bg-transparent text-gray-400 hover:text-white hover:bg-white/10'}`}>
@@ -189,7 +188,6 @@ function ScreenShareWrapper({ tracks, isHost, room }: { tracks: any[], isHost: b
     </div>
   );
 }
-
 
 // ====================================================
 // БОКОВАЯ ПАНЕЛЬ (ЧАТ + УЧАСТНИКИ)
@@ -281,7 +279,7 @@ function AlveriumSidebar({ isOpen, onClose, isHost }: { isOpen: boolean, onClose
 function AlveriumStage() {
   const [isSidebarOpen, setIsSidebarOpen] = useState(false);
   const [isWhiteboardOpen, setIsWhiteboardOpen] = useState(false);
-  const [isHost, setIsHost] = useState(false); 
+  const [isHost, setIsHost] = useState(false);
 
   // --- Стейты и рефы для записи ---
   const [isRecording, setIsRecording] = useState(false);
@@ -292,9 +290,22 @@ function AlveriumStage() {
 
   const searchParams = useSearchParams();
   const token = searchParams.get('token');
-  const room = useRoomContext(); 
+  const room = useRoomContext();
 
   useEffect(() => { setIsHost(parseJwtAdmin(token)); }, [token]);
+
+  // FIX: Синхронизация статуса доски для опоздавших учеников
+  useEffect(() => {
+    const handleParticipantConnected = () => {
+      if (isHost && isWhiteboardOpen) {
+        setTimeout(() => {
+          room.localParticipant.publishData(new TextEncoder().encode(JSON.stringify({ type: 'WHITEBOARD_TOGGLE', isOpen: true })), { reliable: true });
+        }, 1000); // Небольшая задержка, чтобы ученик успел загрузиться
+      }
+    };
+    room.on(RoomEvent.ParticipantConnected, handleParticipantConnected);
+    return () => { room.off(RoomEvent.ParticipantConnected, handleParticipantConnected); };
+  }, [room, isHost, isWhiteboardOpen]);
 
   useEffect(() => {
     const handleDataReceived = (payload: Uint8Array) => {
@@ -325,7 +336,7 @@ function AlveriumStage() {
         video: { displaySurface: "browser" },
         audio: true,
         // @ts-ignore
-        preferCurrentTab: true 
+        preferCurrentTab: true
       });
 
       streamRef.current = stream;
@@ -339,7 +350,7 @@ function AlveriumStage() {
       recorder.onstop = async () => {
         setIsRecording(false);
         stream.getTracks().forEach(t => t.stop());
-        
+
         const blob = new Blob(recordedChunksRef.current, { type: 'video/webm' });
         if (blob.size > 0) {
           uploadRecordedLesson(blob);
@@ -347,7 +358,7 @@ function AlveriumStage() {
       };
 
       mediaRecorderRef.current = recorder;
-      recorder.start(1000); 
+      recorder.start(1000);
       setIsRecording(true);
     } catch (err) {
       console.error("Ошибка запуска записи:", err);
@@ -402,11 +413,20 @@ function AlveriumStage() {
 
   return (
     <div className="flex flex-col h-[100dvh] bg-[#000000] text-white font-sans selection:bg-red-900/50 relative">
+      
+      {/* ГЛОБАЛЬНЫЙ CSS ФИКС ОБРЕЗКИ ВИДЕО ДЛЯ ВСЕЙ КОМНАТЫ */}
+      <style dangerouslySetInnerHTML={{__html: `
+        .lk-participant-tile video {
+          object-fit: contain !important;
+          background-color: #000;
+        }
+      `}} />
+
       <header className="flex items-center justify-between px-4 md:px-8 py-4 bg-[#050505]/80 backdrop-blur-xl border-b border-white/5 z-20 shrink-0">
         <div className="flex items-center gap-4">
           <div className="w-8 h-8 bg-gradient-to-br from-red-800 to-red-600 rounded-lg flex items-center justify-center font-bold text-white text-sm shadow-[0_0_15px_rgba(220,38,38,0.2)]">A</div>
           <h1 className="text-sm font-semibold text-gray-100 tracking-wide hidden md:block">Alverium <span className="font-light text-gray-500">Meet</span></h1>
-          
+
           {uploadProgress > 0 && (
             <div className="text-[10px] text-green-400 font-bold uppercase tracking-widest bg-green-900/20 px-3 py-1 rounded-full border border-green-800/50">
               Выгрузка: {uploadProgress}%
@@ -428,25 +448,37 @@ function AlveriumStage() {
       <main className="flex-1 flex overflow-hidden relative">
         <div className="flex-1 relative bg-[#0a0a0a]">
           {isWhiteboardOpen ? (
-            <>
-              <div className="absolute inset-0 p-2 md:p-4"><AlveriumWhiteboard isHost={isHost} /></div>
+            // FIX: Идеальный Layout для доски на телефоне
+            <div className="absolute inset-0 flex flex-col md:block p-2 md:p-4 gap-2">
+              <div className="flex-none h-[50vh] md:h-full w-full md:absolute md:inset-0 md:p-4 z-10 relative">
+                <AlveriumWhiteboard isHost={isHost} />
+              </div>
               {cameraTracks.length > 0 && (
-                <div className="absolute bottom-4 right-4 md:bottom-6 md:right-6 z-20 w-28 md:w-48 max-h-[60vh] overflow-y-auto flex flex-col gap-2 p-1.5 md:p-2 bg-black/60 backdrop-blur-md rounded-xl border border-white/10 shadow-2xl">
-                  {cameraTracks.map((track) => (<div key={track.publication?.trackSid || track.participant.identity} className="w-full aspect-video bg-black rounded-lg overflow-hidden relative"><ParticipantTile trackRef={track} /></div>))}
+                <div className="flex-1 md:flex-none w-full md:w-48 md:absolute md:bottom-6 md:right-6 z-20 overflow-x-auto md:overflow-y-auto flex flex-row md:flex-col gap-2 p-2 md:p-2 md:bg-black/60 md:backdrop-blur-md rounded-xl md:border md:border-white/10 md:shadow-2xl">
+                  {cameraTracks.map((track) => (
+                    <div key={track.publication?.trackSid || track.participant.identity} className="w-[45%] md:w-full aspect-video bg-black rounded-lg overflow-hidden relative shrink-0">
+                      <ParticipantTile trackRef={track} />
+                    </div>
+                  ))}
                 </div>
               )}
-            </>
+            </div>
           ) : hasScreenShare ? (
-            <>
-              <div className="absolute inset-0 p-2 md:p-4">
+            // FIX: Такой же Layout для шаринга экрана
+            <div className="absolute inset-0 flex flex-col md:block p-2 md:p-4 gap-2">
+              <div className="flex-none h-[50vh] md:h-full w-full md:absolute md:inset-0 md:p-4 z-10 relative">
                 <ScreenShareWrapper tracks={screenTracks} isHost={isHost} room={room} />
               </div>
               {cameraTracks.length > 0 && (
-                <div className="absolute bottom-4 right-4 md:bottom-6 md:right-6 z-20 w-28 md:w-48 max-h-[60vh] overflow-y-auto flex flex-col gap-2 p-1.5 md:p-2 bg-black/60 backdrop-blur-md rounded-xl border border-white/10 shadow-2xl">
-                  {cameraTracks.map((track) => (<div key={track.publication?.trackSid || track.participant.identity} className="w-full aspect-video bg-black rounded-lg overflow-hidden relative"><ParticipantTile trackRef={track} /></div>))}
+                <div className="flex-1 md:flex-none w-full md:w-48 md:absolute md:bottom-6 md:right-6 z-20 overflow-x-auto md:overflow-y-auto flex flex-row md:flex-col gap-2 p-2 md:p-2 md:bg-black/60 md:backdrop-blur-md rounded-xl md:border md:border-white/10 md:shadow-2xl">
+                  {cameraTracks.map((track) => (
+                    <div key={track.publication?.trackSid || track.participant.identity} className="w-[45%] md:w-full aspect-video bg-black rounded-lg overflow-hidden relative shrink-0">
+                      <ParticipantTile trackRef={track} />
+                    </div>
+                  ))}
                 </div>
               )}
-            </>
+            </div>
           ) : (
             <div className="absolute inset-0 p-2 md:p-4"><GridLayout tracks={cameraTracks} style={{ height: '100%' }}><ParticipantTile /></GridLayout></div>
           )}
@@ -457,10 +489,10 @@ function AlveriumStage() {
       <footer className="bg-[#050505]/90 backdrop-blur-2xl px-4 md:px-8 py-3 md:py-4 flex justify-between items-center z-20 border-t border-white/5 shrink-0">
         <div className="flex gap-2 md:gap-3 w-auto md:w-1/3">
           <button onClick={() => alert('Настройки (в разработке)')} className="hidden md:flex items-center justify-center w-12 h-12 rounded-xl bg-white/5 border border-white/5 hover:bg-white/10 text-gray-400 hover:text-white transition-all"><SettingsIcon /></button>
-          
+
           {isHost && (
-            <button 
-              onClick={isRecording ? stopRecording : startRecording} 
+            <button
+              onClick={isRecording ? stopRecording : startRecording}
               className={`hidden md:flex items-center justify-center w-12 h-12 rounded-xl transition-all relative overflow-hidden ${isRecording ? 'bg-red-900/40 border-red-500 text-red-500 shadow-[0_0_15px_rgba(239,68,68,0.2)]' : 'bg-white/5 border-white/5 hover:bg-red-900/20 text-gray-400'}`}
               title={isRecording ? "Остановить запись" : "Начать запись"}
             >
@@ -473,7 +505,7 @@ function AlveriumStage() {
             <button onClick={toggleWhiteboard} className={`flex items-center justify-center w-10 h-10 md:w-12 md:h-12 rounded-xl border transition-all ${isWhiteboardOpen ? 'bg-red-800 border-red-600 text-white' : 'bg-white/5 border-white/5 text-gray-400 hover:text-white'}`}><PenIcon /></button>
           )}
         </div>
-        
+
         <div className="flex items-center gap-1 md:gap-2 bg-[#0a0a0a] px-2 py-1.5 md:px-3 md:py-2 rounded-2xl border border-white/5 shadow-2xl">
           <TrackToggle source={Track.Source.Microphone} className="!bg-transparent hover:!bg-white/10 !text-gray-300 hover:!text-white !border-none !rounded-xl transition-all !w-10 !h-10 md:!w-12" />
           <TrackToggle source={Track.Source.Camera} className="!bg-transparent hover:!bg-white/10 !text-gray-300 hover:!text-white !border-none !rounded-xl transition-all !w-10 !h-10 md:!w-12" />
