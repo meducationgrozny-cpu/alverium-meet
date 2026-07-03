@@ -6,7 +6,6 @@ import { RoomEvent } from 'livekit-client';
 import * as pdfjsLib from 'pdfjs-dist';
 import { PDFDocument } from 'pdf-lib';
 
-// Подключаем воркер через CDN, чтобы Next.js не ругался на сборку
 if (typeof window !== 'undefined') {
   pdfjsLib.GlobalWorkerOptions.workerSrc = `https://cdnjs.cloudflare.com/ajax/libs/pdf.js/${pdfjsLib.version}/pdf.worker.min.js`;
 }
@@ -20,25 +19,20 @@ export default function AlveriumWhiteboard({ isHost }: { isHost: boolean }) {
   const drawCanvasRef = useRef<HTMLCanvasElement>(null);
   const bgCanvasRef = useRef<HTMLCanvasElement>(null);
   
-  // Виртуальное разрешение (сохраняет пропорции на любых экранах)
   const VIRTUAL_W = 1920;
   const VIRTUAL_H = 1080;
 
-  // Стейты
   const [currentPage, setCurrentPage] = useState(1);
   const [totalPages, setTotalPages] = useState(1);
   const [isDrawing, setIsDrawing] = useState(false);
   const [uploadProgress, setUploadProgress] = useState(0);
 
-  // Память: [номер страницы] -> массив линий
   const linesMap = useRef<Record<number, Line[]>>({});
   const currentLine = useRef<Line | null>(null);
 
-  // Хранилище PDF
   const pdfDocRef = useRef<pdfjsLib.PDFDocumentProxy | null>(null);
   const pdfBytesRef = useRef<ArrayBuffer | null>(null);
 
-  // ====================== WebRTC Синхронизация ======================
   useEffect(() => {
     const handleData = (payload: Uint8Array) => {
       try {
@@ -59,7 +53,6 @@ export default function AlveriumWhiteboard({ isHost }: { isHost: boolean }) {
     return () => { room.off(RoomEvent.DataReceived, handleData); };
   }, [room, currentPage]);
 
-  // ====================== Отрисовка PDF ======================
   useEffect(() => {
     if (pdfDocRef.current) renderPdfPage(currentPage);
     drawAllLines(currentPage);
@@ -68,24 +61,20 @@ export default function AlveriumWhiteboard({ isHost }: { isHost: boolean }) {
   const renderPdfPage = async (pageNum: number) => {
     if (!pdfDocRef.current || !bgCanvasRef.current) return;
     const page = await pdfDocRef.current.getPage(pageNum);
-    const viewport = page.getViewport({ scale: 2.0 }); // Рендерим в высоком качестве
+    const viewport = page.getViewport({ scale: 2.0 });
     
     const canvas = bgCanvasRef.current;
     const ctx = canvas.getContext('2d');
     if (!ctx) return;
 
-    // Очищаем фон (белый цвет)
     ctx.fillStyle = '#ffffff';
     ctx.fillRect(0, 0, VIRTUAL_W, VIRTUAL_H);
 
-    // Центрируем PDF на виртуальном холсте
-    const renderContext = { canvasContext: ctx, viewport: viewport };
-    // @ts-ignore
-    renderContext.canvas = canvas;
+    // FIX: Говорим TypeScript проигнорировать строгую типизацию здесь
+    const renderContext: any = { canvasContext: ctx, viewport: viewport };
     await page.render(renderContext).promise;
   };
 
-  // ====================== Загрузка PDF ======================
   const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file || !isHost) return;
@@ -100,15 +89,12 @@ export default function AlveriumWhiteboard({ isHost }: { isHost: boolean }) {
     setTotalPages(pdf.numPages);
     setCurrentPage(1);
     
-    // Отправляем ученикам сигнал сброса
     broadcast({ type: 'WB_PAGE', page: 1 });
   };
 
-  // ====================== Рисование ======================
   const getCoords = (e: React.PointerEvent) => {
     if (!drawCanvasRef.current) return { x: 0, y: 0 };
     const rect = drawCanvasRef.current.getBoundingClientRect();
-    // Переводим реальные координаты клика в виртуальную сетку 1920x1080
     const scaleX = VIRTUAL_W / rect.width;
     const scaleY = VIRTUAL_H / rect.height;
     return {
@@ -173,7 +159,6 @@ export default function AlveriumWhiteboard({ isHost }: { isHost: boolean }) {
     broadcast({ type: 'WB_CLEAR', page: currentPage });
   };
 
-  // ====================== Вставка картинок (Ctrl+V) ======================
   useEffect(() => {
     const handlePaste = (e: ClipboardEvent) => {
       if (!isHost) return;
@@ -188,9 +173,11 @@ export default function AlveriumWhiteboard({ isHost }: { isHost: boolean }) {
                const img = new Image();
                img.onload = () => {
                  const ctx = bgCanvasRef.current?.getContext('2d');
-                 if (ctx) ctx.drawImage(img, 0, 0, VIRTUAL_W, VIRTUAL_H);
-                 // Примечание: для синхронизации картинок нужен серверный upload, 
-                 // пока картинка ложится только на фон хоста.
+                 if (ctx) {
+                   ctx.fillStyle = '#ffffff';
+                   ctx.fillRect(0, 0, VIRTUAL_W, VIRTUAL_H);
+                   ctx.drawImage(img, 0, 0, VIRTUAL_W, VIRTUAL_H);
+                 }
                };
                img.src = ev.target?.result as string;
              };
@@ -203,7 +190,6 @@ export default function AlveriumWhiteboard({ isHost }: { isHost: boolean }) {
     return () => document.removeEventListener('paste', handlePaste);
   }, [isHost]);
 
-  // ====================== Экспорт и Сохранение PDF ======================
   const saveAndUploadNotes = async () => {
     if (!pdfBytesRef.current) {
       alert("Сначала загрузите PDF презентацию!");
@@ -212,14 +198,11 @@ export default function AlveriumWhiteboard({ isHost }: { isHost: boolean }) {
     
     setUploadProgress(1);
     try {
-      // 1. Загружаем оригинальный PDF
       const pdfDoc = await PDFDocument.load(pdfBytesRef.current);
       
-      // 2. Проходим по всем страницам и "запекаем" рисунки
       for (let i = 0; i < totalPages; i++) {
         const pageNum = i + 1;
         if (linesMap.current[pageNum] && linesMap.current[pageNum].length > 0) {
-          // Отрисовываем линии этой страницы на невидимом холсте
           const tempCanvas = document.createElement('canvas');
           tempCanvas.width = VIRTUAL_W;
           tempCanvas.height = VIRTUAL_H;
@@ -237,7 +220,6 @@ export default function AlveriumWhiteboard({ isHost }: { isHost: boolean }) {
             ctx.stroke();
           });
 
-          // Переводим холст в PNG и встраиваем в страницу PDF
           const pngImageBytes = await fetch(tempCanvas.toDataURL()).then(res => res.arrayBuffer());
           const pngImage = await pdfDoc.embedPng(pngImageBytes);
           const pdfPage = pdfDoc.getPage(i);
@@ -249,11 +231,9 @@ export default function AlveriumWhiteboard({ isHost }: { isHost: boolean }) {
         }
       }
 
-      // 3. Сохраняем запеченный PDF
       const pdfBytes = await pdfDoc.save();
       const blob = new Blob([pdfBytes], { type: 'application/pdf' });
       
-      // 4. Отправляем чанками в VOD консоль
       uploadChunked(blob);
 
     } catch (err) {
@@ -277,7 +257,7 @@ export default function AlveriumWhiteboard({ isHost }: { isHost: boolean }) {
       fd.append('filename', filename);
       fd.append('chunkIndex', String(i));
       fd.append('totalChunks', String(totalChunks));
-      fd.append('folder', 'common'); // Сохраняем в общую папку
+      fd.append('folder', 'common');
 
       try {
         await fetch('https://video.alverium.ru/upload_chunk', { method: 'POST', body: fd });
@@ -294,8 +274,6 @@ export default function AlveriumWhiteboard({ isHost }: { isHost: boolean }) {
 
   return (
     <div className="relative w-full h-full bg-[#1a1a1a] flex flex-col rounded-xl overflow-hidden shadow-2xl">
-      
-      {/* Панель управления (только для хоста) */}
       {isHost && (
         <div className="absolute top-4 left-1/2 -translate-x-1/2 z-30 flex items-center gap-4 bg-black/80 backdrop-blur-md px-4 py-2 rounded-2xl border border-white/10 shadow-2xl">
           <label className="cursor-pointer bg-white/10 hover:bg-white/20 text-white text-xs font-bold px-3 py-1.5 rounded-lg transition-all">
@@ -316,14 +294,9 @@ export default function AlveriumWhiteboard({ isHost }: { isHost: boolean }) {
         </div>
       )}
 
-      {/* Контейнер холста (сохраняет пропорции 16:9) */}
       <div ref={containerRef} className="flex-1 w-full h-full p-4 flex items-center justify-center relative touch-none">
         <div className="relative shadow-2xl bg-white" style={{ aspectRatio: '16/9', maxHeight: '100%', maxWidth: '100%' }}>
-          
-          {/* Слой 1: Фон (PDF или картинка) */}
           <canvas ref={bgCanvasRef} width={VIRTUAL_W} height={VIRTUAL_H} className="absolute inset-0 w-full h-full object-contain pointer-events-none rounded-lg" />
-          
-          {/* Слой 2: Рисование */}
           <canvas
             ref={drawCanvasRef}
             width={VIRTUAL_W}
