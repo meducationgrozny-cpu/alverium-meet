@@ -70,7 +70,6 @@ export default function AlveriumWhiteboard({ isHost }: { isHost: boolean }) {
     ctx.fillStyle = '#ffffff';
     ctx.fillRect(0, 0, VIRTUAL_W, VIRTUAL_H);
 
-    // FIX: Говорим TypeScript проигнорировать строгую типизацию здесь
     const renderContext: any = { canvasContext: ctx, viewport: viewport };
     await page.render(renderContext).promise;
   };
@@ -232,7 +231,8 @@ export default function AlveriumWhiteboard({ isHost }: { isHost: boolean }) {
       }
 
       const pdfBytes = await pdfDoc.save();
-      const blob = new Blob([pdfBytes], { type: 'application/pdf' });
+      // FIX: Принудительно отключаем проверку типов для создания Blob
+      const blob = new Blob([pdfBytes as any], { type: 'application/pdf' });
       
       uploadChunked(blob);
 
