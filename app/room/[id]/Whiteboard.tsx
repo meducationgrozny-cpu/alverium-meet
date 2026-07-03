@@ -34,6 +34,7 @@ export default function AlveriumWhiteboard({ isHost }: { isHost: boolean }) {
 
   const pdfDocRef = useRef<pdfjsLib.PDFDocumentProxy | null>(null);
   const pdfBytesRef = useRef<ArrayBuffer | null>(null);
+  const currentPdfUrlRef = useRef<string | null>(null);
 
   useEffect(() => {
     const saved = localStorage.getItem(ROOM_KEY);
@@ -46,19 +47,24 @@ export default function AlveriumWhiteboard({ isHost }: { isHost: boolean }) {
     localStorage.setItem(ROOM_KEY, JSON.stringify(linesMap.current));
   };
 
+  // Синхронизация опоздавших учеников
   useEffect(() => {
-    const handleUnload = (e: BeforeUnloadEvent) => {
-      if (isHost && (totalPages > 1 || Object.keys(linesMap.current).length > 0)) {
-        e.preventDefault();
-        e.returnValue = 'У вас есть несохраненные изменения. Точно хотите выйти?';
+    const handleParticipantConnected = () => {
+      if (isHost) {
+        setTimeout(() => {
+          broadcast({ type: 'WB_PAGE', page: currentPage });
+          if (currentPdfUrlRef.current) {
+            broadcast({ type: 'WB_PDF_URL', url: currentPdfUrlRef.current });
+          }
+        }, 2000);
       }
     };
-    window.addEventListener('beforeunload', handleUnload);
-    return () => window.removeEventListener('beforeunload', handleUnload);
-  }, [isHost, totalPages]);
+    room.on(RoomEvent.ParticipantConnected, handleParticipantConnected);
+    return () => { room.off(RoomEvent.ParticipantConnected, handleParticipantConnected); };
+  }, [isHost, currentPage, room]);
 
   useEffect(() => {
-    const handleData = (payload: Uint8Array) => {
+    const handleData = async (payload: Uint8Array) => {
       try {
         const msg = JSON.parse(new TextDecoder().decode(payload));
         if (msg.type === 'WB_DRAW') {
@@ -72,12 +78,26 @@ export default function AlveriumWhiteboard({ isHost }: { isHost: boolean }) {
           linesMap.current[msg.page] = [];
           saveToLocal();
           if (msg.page === currentPage) drawAllLines(msg.page);
+        } else if (msg.type === 'WB_PDF_URL' && !isHost) {
+          // Ученик получает URL и скачивает PDF
+          try {
+            const res = await fetch(`/api/proxy-pdf?url=${encodeURIComponent(msg.url)}`);
+            const arrayBuffer = await res.arrayBuffer();
+            pdfBytesRef.current = arrayBuffer.slice(0);
+            const loadingTask = pdfjsLib.getDocument({ data: arrayBuffer });
+            const pdf = await loadingTask.promise;
+            pdfDocRef.current = pdf;
+            setTotalPages(pdf.numPages);
+            setRenderTrigger(prev => prev + 1);
+          } catch (e) {
+            console.error("Ошибка загрузки синхронизированного PDF", e);
+          }
         }
       } catch (e) {}
     };
     room.on(RoomEvent.DataReceived, handleData);
     return () => { room.off(RoomEvent.DataReceived, handleData); };
-  }, [room, currentPage]);
+  }, [room, currentPage, isHost]);
 
   useEffect(() => {
     if (pdfDocRef.current) renderPdfPage(currentPage);
@@ -88,29 +108,20 @@ export default function AlveriumWhiteboard({ isHost }: { isHost: boolean }) {
     if (!pdfDocRef.current || !bgCanvasRef.current) return;
     try {
       const page = await pdfDocRef.current.getPage(pageNum);
-      
       const unscaledViewport = page.getViewport({ scale: 1.0 });
       const scale = Math.min(VIRTUAL_W / unscaledViewport.width, VIRTUAL_H / unscaledViewport.height);
       const viewport = page.getViewport({ scale });
-      
       const canvas = bgCanvasRef.current;
       const ctx = canvas.getContext('2d');
       if (!ctx) return;
-
       ctx.fillStyle = '#ffffff';
       ctx.fillRect(0, 0, VIRTUAL_W, VIRTUAL_H);
-
       const offsetX = (VIRTUAL_W - viewport.width) / 2;
       const offsetY = (VIRTUAL_H - viewport.height) / 2;
-
-      const renderContext: any = { 
-        canvasContext: ctx, 
-        viewport: viewport,
-        transform: [1, 0, 0, 1, offsetX, offsetY]
-      };
+      const renderContext: any = { canvasContext: ctx, viewport: viewport, transform: [1, 0, 0, 1, offsetX, offsetY] };
       await page.render(renderContext).promise;
     } catch (err) {
-      console.error("Ошибка рендера страницы:", err);
+      console.error("Ошибка рендера:", err);
     }
   };
 
@@ -121,18 +132,32 @@ export default function AlveriumWhiteboard({ isHost }: { isHost: boolean }) {
     try {
         const arrayBuffer = await file.arrayBuffer();
         pdfBytesRef.current = arrayBuffer.slice(0);
-        
         const loadingTask = pdfjsLib.getDocument({ data: arrayBuffer });
         const pdf = await loadingTask.promise;
-        
         pdfDocRef.current = pdf;
         setTotalPages(pdf.numPages);
         setCurrentPage(1);
-        
         setRenderTrigger(prev => prev + 1);
         broadcast({ type: 'WB_PAGE', page: 1 });
+
+        // Фоновая выгрузка для учеников
+        const fd = new FormData();
+        const tempFilename = `sync_${Date.now()}.pdf`;
+        fd.append('file', file);
+        fd.append('filename', tempFilename);
+        fd.append('chunkIndex', '0');
+        fd.append('totalChunks', '1');
+        fd.append('folder', 'temp');
+
+        fetch('https://video.alverium.ru/upload_chunk', { method: 'POST', body: fd })
+          .then(() => {
+            const url = `https://video.alverium.ru/play/temp/${tempFilename}`;
+            currentPdfUrlRef.current = url;
+            broadcast({ type: 'WB_PDF_URL', url });
+          });
+
     } catch (err) {
-        alert("Ошибка чтения PDF. Убедитесь, что файл не поврежден: " + err);
+        alert("Ошибка чтения PDF: " + err);
     }
   };
 
@@ -141,10 +166,7 @@ export default function AlveriumWhiteboard({ isHost }: { isHost: boolean }) {
     const rect = drawCanvasRef.current.getBoundingClientRect();
     const scaleX = VIRTUAL_W / rect.width;
     const scaleY = VIRTUAL_H / rect.height;
-    return {
-      x: (e.clientX - rect.left) * scaleX,
-      y: (e.clientY - rect.top) * scaleY
-    };
+    return { x: (e.clientX - rect.left) * scaleX, y: (e.clientY - rect.top) * scaleY };
   };
 
   const onPointerDown = (e: React.PointerEvent) => {
@@ -163,11 +185,9 @@ export default function AlveriumWhiteboard({ isHost }: { isHost: boolean }) {
   const onPointerUp = () => {
     if (!isDrawing || !currentLine.current || !isHost) return;
     setIsDrawing(false);
-    
     if (!linesMap.current[currentPage]) linesMap.current[currentPage] = [];
     linesMap.current[currentPage].push(currentLine.current);
     saveToLocal();
-    
     broadcast({ type: 'WB_DRAW', page: currentPage, line: currentLine.current });
     currentLine.current = null;
   };
@@ -178,10 +198,8 @@ export default function AlveriumWhiteboard({ isHost }: { isHost: boolean }) {
     ctx.clearRect(0, 0, VIRTUAL_W, VIRTUAL_H);
     ctx.lineCap = 'round';
     ctx.lineJoin = 'round';
-
     const lines = linesMap.current[page] || [];
     const allLines = activeLine ? [...lines, activeLine] : lines;
-
     allLines.forEach(line => {
       ctx.beginPath();
       ctx.strokeStyle = line.color;
@@ -205,83 +223,37 @@ export default function AlveriumWhiteboard({ isHost }: { isHost: boolean }) {
     broadcast({ type: 'WB_CLEAR', page: currentPage });
   };
 
-  useEffect(() => {
-    const handlePaste = (e: ClipboardEvent) => {
-      if (!isHost) return;
-      const items = e.clipboardData?.items;
-      if (!items) return;
-      for (let i = 0; i < items.length; i++) {
-        if (items[i].type.indexOf('image') !== -1) {
-          const file = items[i].getAsFile();
-          if (file) {
-             const reader = new FileReader();
-             reader.onload = (ev) => {
-               const img = new Image();
-               img.onload = () => {
-                 const ctx = bgCanvasRef.current?.getContext('2d');
-                 if (ctx) {
-                   ctx.fillStyle = '#ffffff';
-                   ctx.fillRect(0, 0, VIRTUAL_W, VIRTUAL_H);
-                   ctx.drawImage(img, 0, 0, VIRTUAL_W, VIRTUAL_H);
-                 }
-               };
-               img.src = ev.target?.result as string;
-             };
-             reader.readAsDataURL(file);
-          }
-        }
-      }
-    };
-    document.addEventListener('paste', handlePaste);
-    return () => document.removeEventListener('paste', handlePaste);
-  }, [isHost]);
-
   const saveAndUploadNotes = async () => {
-    if (!pdfBytesRef.current) {
-      alert("Сначала загрузите PDF презентацию!");
-      return;
-    }
-    
+    if (!pdfBytesRef.current) { alert("Сначала загрузите PDF!"); return; }
     setUploadProgress(1);
     try {
       const pdfDoc = await PDFDocument.load(pdfBytesRef.current);
-      
       for (let i = 0; i < totalPages; i++) {
         const pageNum = i + 1;
         if (linesMap.current[pageNum] && linesMap.current[pageNum].length > 0) {
           const tempCanvas = document.createElement('canvas');
-          tempCanvas.width = VIRTUAL_W;
-          tempCanvas.height = VIRTUAL_H;
+          tempCanvas.width = VIRTUAL_W; tempCanvas.height = VIRTUAL_H;
           const ctx = tempCanvas.getContext('2d')!;
           ctx.lineCap = 'round'; ctx.lineJoin = 'round';
-          
           linesMap.current[pageNum].forEach(line => {
             ctx.beginPath();
             ctx.strokeStyle = line.color;
             ctx.lineWidth = line.width;
             line.points.forEach((p, idx) => {
-              if (idx === 0) ctx.moveTo(p.x, p.y);
-              else ctx.lineTo(p.x, p.y);
+              if (idx === 0) ctx.moveTo(p.x, p.y); else ctx.lineTo(p.x, p.y);
             });
             ctx.stroke();
           });
-
           const pngImageBytes = await fetch(tempCanvas.toDataURL()).then(res => res.arrayBuffer());
           const pngImage = await pdfDoc.embedPng(pngImageBytes);
           const pdfPage = pdfDoc.getPage(i);
           const { width, height } = pdfPage.getSize();
-          
-          pdfPage.drawImage(pngImage, {
-            x: 0, y: 0, width: width, height: height, opacity: 1
-          });
+          pdfPage.drawImage(pngImage, { x: 0, y: 0, width: width, height: height, opacity: 1 });
         }
       }
-
       const pdfBytes = await pdfDoc.save();
       const blob = new Blob([pdfBytes as any], { type: 'application/pdf' });
-      
       uploadChunked(blob);
-
     } catch (err) {
       console.error(err);
       alert("Ошибка при сохранении PDF");
@@ -296,15 +268,11 @@ export default function AlveriumWhiteboard({ isHost }: { isHost: boolean }) {
     const filename = `Alverium_Notes_${dateStr}.pdf`;
 
     for (let i = 0; i < totalChunks; i++) {
-      const start = i * CHUNK_SIZE;
-      const end = Math.min(start + CHUNK_SIZE, blob.size);
       const fd = new FormData();
-      fd.append('file', blob.slice(start, end));
+      fd.append('file', blob.slice(i * CHUNK_SIZE, Math.min((i + 1) * CHUNK_SIZE, blob.size)));
       fd.append('filename', filename);
       fd.append('chunkIndex', String(i));
       fd.append('totalChunks', String(totalChunks));
-      
-      // ИСПРАВЛЕНИЕ: Выгружаем напрямую в папку 'notes' (Конспекты)
       fd.append('folder', 'notes');
 
       try {
@@ -312,84 +280,50 @@ export default function AlveriumWhiteboard({ isHost }: { isHost: boolean }) {
         setUploadProgress(Math.round(((i + 1) / totalChunks) * 100));
       } catch (e) {
         alert("Ошибка выгрузки конспекта.");
-        setUploadProgress(0);
-        return;
+        setUploadProgress(0); return;
       }
     }
-    alert(`Конспект успешно сохранен в VOD консоли (Папка Конспекты) как ${filename}!`);
+    alert(`Конспект успешно сохранен в VOD консоли как ${filename}!`);
     localStorage.removeItem(ROOM_KEY);
     setUploadProgress(0);
   };
 
   return (
-    <>
-      {/* ГЛОБАЛЬНЫЕ CSS-ФИКСЫ ДЛЯ LIVEKIT И МОБИЛЬНЫХ УСТРОЙСТВ */}
-      <style dangerouslySetInnerHTML={{__html: `
-        /* Убираем "челку", показываем всё видео без обрезки */
-        .lk-participant-tile video {
-          object-fit: contain !important;
-          background-color: #000;
-        }
-        
-        /* Заставляем LiveKit на мобилках делить экран пополам: сверху доска, снизу видео */
-        @media (max-width: 768px) {
-          .lk-video-conference {
-            flex-direction: column !important;
-          }
-          .lk-video-conference > .lk-participant-grid {
-            height: 35vh !important;
-            flex: none !important;
-            order: 2;
-          }
-          /* Контейнер доски на телефоне */
-          .mobile-wb-wrapper {
-            height: 55vh !important;
-            flex: none !important;
-            order: 1;
-            z-index: 50;
-            width: 100%;
-          }
-        }
-      `}} />
-
-      <div className="mobile-wb-wrapper relative w-full h-full min-h-[350px] md:min-h-0 bg-[#1a1a1a] flex flex-col rounded-xl overflow-hidden shadow-2xl">
-        {isHost && (
-          <div className="absolute top-4 left-1/2 -translate-x-1/2 z-30 flex items-center gap-4 bg-black/80 backdrop-blur-md px-4 py-2 rounded-2xl border border-white/10 shadow-2xl">
-            <label className="cursor-pointer bg-white/10 hover:bg-white/20 text-white text-xs font-bold px-3 py-1.5 rounded-lg transition-all">
-              + PDF
-              <input type="file" accept="application/pdf" className="hidden" onChange={handleFileUpload} />
-            </label>
-            
-            <div className="flex items-center gap-2 text-gray-300 font-mono text-sm">
-              <button disabled={currentPage <= 1} onClick={() => { setCurrentPage(p => p - 1); broadcast({ type: 'WB_PAGE', page: currentPage - 1 }); }} className="px-2 hover:text-white disabled:opacity-50">◀</button>
-              <span>{currentPage} / {totalPages}</span>
-              <button disabled={currentPage >= totalPages} onClick={() => { setCurrentPage(p => p + 1); broadcast({ type: 'WB_PAGE', page: currentPage + 1 }); }} className="px-2 hover:text-white disabled:opacity-50">▶</button>
-            </div>
-
-            <button onClick={clearPage} className="text-red-400 hover:text-red-300 text-xs font-bold px-2 uppercase transition-colors">Очистить</button>
-            <button onClick={saveAndUploadNotes} className="bg-red-800 hover:bg-red-700 text-white text-xs font-bold px-3 py-1.5 rounded-lg shadow-[0_0_10px_rgba(153,27,27,0.5)] transition-all">
-              {uploadProgress > 0 ? `Сохранение: ${uploadProgress}%` : '💾 В LMS'}
-            </button>
+    <div className="relative w-full h-full bg-[#1a1a1a] flex flex-col rounded-xl overflow-hidden shadow-2xl">
+      {isHost && (
+        <div className="absolute top-4 left-1/2 -translate-x-1/2 z-30 flex items-center gap-4 bg-black/80 backdrop-blur-md px-4 py-2 rounded-2xl border border-white/10 shadow-2xl">
+          <label className="cursor-pointer bg-white/10 hover:bg-white/20 text-white text-xs font-bold px-3 py-1.5 rounded-lg transition-all">
+            + PDF
+            <input type="file" accept="application/pdf" className="hidden" onChange={handleFileUpload} />
+          </label>
+          <div className="flex items-center gap-2 text-gray-300 font-mono text-sm">
+            <button disabled={currentPage <= 1} onClick={() => { setCurrentPage(p => p - 1); broadcast({ type: 'WB_PAGE', page: currentPage - 1 }); }} className="px-2 hover:text-white disabled:opacity-50">◀</button>
+            <span>{currentPage} / {totalPages}</span>
+            <button disabled={currentPage >= totalPages} onClick={() => { setCurrentPage(p => p + 1); broadcast({ type: 'WB_PAGE', page: currentPage + 1 }); }} className="px-2 hover:text-white disabled:opacity-50">▶</button>
           </div>
-        )}
+          <button onClick={clearPage} className="text-red-400 hover:text-red-300 text-xs font-bold px-2 uppercase transition-colors">Очистить</button>
+          <button onClick={saveAndUploadNotes} className="bg-red-800 hover:bg-red-700 text-white text-xs font-bold px-3 py-1.5 rounded-lg shadow-[0_0_10px_rgba(153,27,27,0.5)] transition-all">
+            {uploadProgress > 0 ? `${uploadProgress}%` : '💾 В LMS'}
+          </button>
+        </div>
+      )}
 
-        <div ref={containerRef} className="flex-1 w-full h-full p-2 sm:p-4 flex items-center justify-center relative touch-none">
-          <div className="relative shadow-2xl bg-white w-full aspect-video max-w-full max-h-full mx-auto flex-shrink-0 rounded-lg overflow-hidden">
-            <canvas ref={bgCanvasRef} width={VIRTUAL_W} height={VIRTUAL_H} className="absolute inset-0 w-full h-full object-contain pointer-events-none" />
-            <canvas
-              ref={drawCanvasRef}
-              width={VIRTUAL_W}
-              height={VIRTUAL_H}
-              onPointerDown={onPointerDown}
-              onPointerMove={onPointerMove}
-              onPointerUp={onPointerUp}
-              onPointerOut={onPointerUp}
-              className={`absolute inset-0 w-full h-full object-contain ${isHost ? 'cursor-crosshair' : 'pointer-events-none'}`}
-              style={{ touchAction: 'none' }}
-            />
-          </div>
+      <div ref={containerRef} className="flex-1 w-full h-full p-0 flex items-center justify-center relative touch-none">
+        <div className="relative shadow-2xl bg-white w-full aspect-video max-w-full max-h-full mx-auto flex-shrink-0 md:rounded-lg overflow-hidden">
+          <canvas ref={bgCanvasRef} width={VIRTUAL_W} height={VIRTUAL_H} className="absolute inset-0 w-full h-full object-contain pointer-events-none" />
+          <canvas
+            ref={drawCanvasRef}
+            width={VIRTUAL_W}
+            height={VIRTUAL_H}
+            onPointerDown={onPointerDown}
+            onPointerMove={onPointerMove}
+            onPointerUp={onPointerUp}
+            onPointerOut={onPointerUp}
+            className={`absolute inset-0 w-full h-full object-contain ${isHost ? 'cursor-crosshair' : 'pointer-events-none'}`}
+            style={{ touchAction: 'none' }}
+          />
         </div>
       </div>
-    </>
+    </div>
   );
 }
