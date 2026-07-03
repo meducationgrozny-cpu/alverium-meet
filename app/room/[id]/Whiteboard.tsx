@@ -6,7 +6,6 @@ import { RoomEvent } from 'livekit-client';
 import * as pdfjsLib from 'pdfjs-dist';
 import { PDFDocument } from 'pdf-lib';
 
-// Возвращаем классический стабильный .js воркер для 3-й версии
 if (typeof window !== 'undefined') {
   pdfjsLib.GlobalWorkerOptions.workerSrc = `https://cdnjs.cloudflare.com/ajax/libs/pdf.js/${pdfjsLib.version}/pdf.worker.min.js`;
 }
@@ -89,7 +88,11 @@ export default function AlveriumWhiteboard({ isHost }: { isHost: boolean }) {
     if (!pdfDocRef.current || !bgCanvasRef.current) return;
     try {
       const page = await pdfDocRef.current.getPage(pageNum);
-      const viewport = page.getViewport({ scale: 2.0 });
+      
+      // ИСПРАВЛЕНИЕ: Динамический расчет масштаба, чтобы слайд вписался в 1920x1080
+      const unscaledViewport = page.getViewport({ scale: 1.0 });
+      const scale = Math.min(VIRTUAL_W / unscaledViewport.width, VIRTUAL_H / unscaledViewport.height);
+      const viewport = page.getViewport({ scale });
       
       const canvas = bgCanvasRef.current;
       const ctx = canvas.getContext('2d');
@@ -98,7 +101,15 @@ export default function AlveriumWhiteboard({ isHost }: { isHost: boolean }) {
       ctx.fillStyle = '#ffffff';
       ctx.fillRect(0, 0, VIRTUAL_W, VIRTUAL_H);
 
-      const renderContext: any = { canvasContext: ctx, viewport: viewport };
+      // Центрируем PDF на холсте
+      const offsetX = (VIRTUAL_W - viewport.width) / 2;
+      const offsetY = (VIRTUAL_H - viewport.height) / 2;
+
+      const renderContext: any = { 
+        canvasContext: ctx, 
+        viewport: viewport,
+        transform: [1, 0, 0, 1, offsetX, offsetY] // Применяем центрирование
+      };
       await page.render(renderContext).promise;
     } catch (err) {
       console.error("Ошибка рендера страницы:", err);
