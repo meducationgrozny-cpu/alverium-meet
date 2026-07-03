@@ -1,175 +1,340 @@
-'use client';
+"use client";
 
-import React, { useState, useRef } from 'react';
-import { Document, Page, pdfjs } from 'react-pdf';
+import React, { useRef, useState, useEffect } from 'react';
+import { useRoomContext } from '@livekit/components-react';
+import { RoomEvent } from 'livekit-client';
+import * as pdfjsLib from 'pdfjs-dist';
+import { PDFDocument } from 'pdf-lib';
 
-// Настраиваем воркер для Next.js
-pdfjs.GlobalWorkerOptions.workerSrc = `//unpkg.com/pdfjs-dist@${pdfjs.version}/build/pdf.worker.min.mjs`;
-
-// ====================================================
-// ИКОНКИ ДЛЯ ТУЛБАРА
-// ====================================================
-const CursorIcon = () => (
-  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className="w-5 h-5">
-    <path strokeLinecap="round" strokeLinejoin="round" d="M15 15l-2 5L9 9l11 4-5 2zm0 0l5 5M7.188 2.239l.777 2.897M5.136 7.965l-2.898-.777M13.95 4.05l-2.122 2.122m-5.657 5.656l-2.12 2.122" />
-  </svg>
-);
-
-const PenIcon = () => (
-  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className="w-5 h-5">
-    <path strokeLinecap="round" strokeLinejoin="round" d="M15.232 5.232l3.536 3.536m-2.036-5.036a2.5 2.5 0 113.536 3.536L6.5 21.036H3v-3.572L16.732 3.732z" />
-  </svg>
-);
-
-const EraserIcon = () => (
-  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className="w-5 h-5">
-    <path strokeLinecap="round" strokeLinejoin="round" d="M19 11L9 21H3v-6L13 5l6 6zM13 5l4-4 4 4-4 4" />
-  </svg>
-);
-
-const UploadIcon = () => (
-  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className="w-5 h-5">
-    <path strokeLinecap="round" strokeLinejoin="round" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-8l-4-4m0 0L8 8m4-4v12" />
-  </svg>
-);
-
-// Добавляем интерфейс для пропсов
-interface WhiteboardProps {
-  isHost: boolean;
+// Подключаем воркер через CDN, чтобы Next.js не ругался на сборку
+if (typeof window !== 'undefined') {
+  pdfjsLib.GlobalWorkerOptions.workerSrc = `https://cdnjs.cloudflare.com/ajax/libs/pdf.js/${pdfjsLib.version}/pdf.worker.min.js`;
 }
 
-export default function AlveriumWhiteboard({ isHost }: WhiteboardProps) {
-  const [pdfFile, setPdfFile] = useState<string | null>(null);
-  const [numPages, setNumPages] = useState<number>(1);
-  const [pageNumber, setPageNumber] = useState<number>(1);
-  const [activeTool, setActiveTool] = useState<'cursor' | 'pen' | 'eraser'>('cursor');
-  
-  const fileInputRef = useRef<HTMLInputElement>(null);
+interface Point { x: number; y: number; }
+interface Line { points: Point[]; color: string; width: number; }
 
-  const onFileChange = (event: React.ChangeEvent<HTMLInputElement>) => {
-    const file = event.target.files?.[0];
-    if (file && file.type === 'application/pdf') {
-      const fileUrl = URL.createObjectURL(file);
-      setPdfFile(fileUrl);
-      setPageNumber(1);
+export default function AlveriumWhiteboard({ isHost }: { isHost: boolean }) {
+  const room = useRoomContext();
+  const containerRef = useRef<HTMLDivElement>(null);
+  const drawCanvasRef = useRef<HTMLCanvasElement>(null);
+  const bgCanvasRef = useRef<HTMLCanvasElement>(null);
+  
+  // Виртуальное разрешение (сохраняет пропорции на любых экранах)
+  const VIRTUAL_W = 1920;
+  const VIRTUAL_H = 1080;
+
+  // Стейты
+  const [currentPage, setCurrentPage] = useState(1);
+  const [totalPages, setTotalPages] = useState(1);
+  const [isDrawing, setIsDrawing] = useState(false);
+  const [uploadProgress, setUploadProgress] = useState(0);
+
+  // Память: [номер страницы] -> массив линий
+  const linesMap = useRef<Record<number, Line[]>>({});
+  const currentLine = useRef<Line | null>(null);
+
+  // Хранилище PDF
+  const pdfDocRef = useRef<pdfjsLib.PDFDocumentProxy | null>(null);
+  const pdfBytesRef = useRef<ArrayBuffer | null>(null);
+
+  // ====================== WebRTC Синхронизация ======================
+  useEffect(() => {
+    const handleData = (payload: Uint8Array) => {
+      try {
+        const msg = JSON.parse(new TextDecoder().decode(payload));
+        if (msg.type === 'WB_DRAW') {
+          if (!linesMap.current[msg.page]) linesMap.current[msg.page] = [];
+          linesMap.current[msg.page].push(msg.line);
+          if (msg.page === currentPage) drawAllLines(msg.page);
+        } else if (msg.type === 'WB_PAGE') {
+          setCurrentPage(msg.page);
+        } else if (msg.type === 'WB_CLEAR') {
+          linesMap.current[msg.page] = [];
+          if (msg.page === currentPage) drawAllLines(msg.page);
+        }
+      } catch (e) {}
+    };
+    room.on(RoomEvent.DataReceived, handleData);
+    return () => { room.off(RoomEvent.DataReceived, handleData); };
+  }, [room, currentPage]);
+
+  // ====================== Отрисовка PDF ======================
+  useEffect(() => {
+    if (pdfDocRef.current) renderPdfPage(currentPage);
+    drawAllLines(currentPage);
+  }, [currentPage]);
+
+  const renderPdfPage = async (pageNum: number) => {
+    if (!pdfDocRef.current || !bgCanvasRef.current) return;
+    const page = await pdfDocRef.current.getPage(pageNum);
+    const viewport = page.getViewport({ scale: 2.0 }); // Рендерим в высоком качестве
+    
+    const canvas = bgCanvasRef.current;
+    const ctx = canvas.getContext('2d');
+    if (!ctx) return;
+
+    // Очищаем фон (белый цвет)
+    ctx.fillStyle = '#ffffff';
+    ctx.fillRect(0, 0, VIRTUAL_W, VIRTUAL_H);
+
+    // Центрируем PDF на виртуальном холсте
+    const renderContext = { canvasContext: ctx, viewport: viewport };
+    await page.render(renderContext).promise;
+  };
+
+  // ====================== Загрузка PDF ======================
+  const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file || !isHost) return;
+
+    const arrayBuffer = await file.arrayBuffer();
+    pdfBytesRef.current = arrayBuffer;
+    
+    const loadingTask = pdfjsLib.getDocument({ data: arrayBuffer });
+    const pdf = await loadingTask.promise;
+    
+    pdfDocRef.current = pdf;
+    setTotalPages(pdf.numPages);
+    setCurrentPage(1);
+    
+    // Отправляем ученикам сигнал сброса
+    broadcast({ type: 'WB_PAGE', page: 1 });
+  };
+
+  // ====================== Рисование ======================
+  const getCoords = (e: React.PointerEvent) => {
+    if (!drawCanvasRef.current) return { x: 0, y: 0 };
+    const rect = drawCanvasRef.current.getBoundingClientRect();
+    // Переводим реальные координаты клика в виртуальную сетку 1920x1080
+    const scaleX = VIRTUAL_W / rect.width;
+    const scaleY = VIRTUAL_H / rect.height;
+    return {
+      x: (e.clientX - rect.left) * scaleX,
+      y: (e.clientY - rect.top) * scaleY
+    };
+  };
+
+  const onPointerDown = (e: React.PointerEvent) => {
+    if (!isHost) return;
+    setIsDrawing(true);
+    const coords = getCoords(e);
+    currentLine.current = { points: [coords], color: '#ef4444', width: 4 };
+  };
+
+  const onPointerMove = (e: React.PointerEvent) => {
+    if (!isDrawing || !currentLine.current || !isHost) return;
+    currentLine.current.points.push(getCoords(e));
+    drawAllLines(currentPage, currentLine.current);
+  };
+
+  const onPointerUp = () => {
+    if (!isDrawing || !currentLine.current || !isHost) return;
+    setIsDrawing(false);
+    
+    if (!linesMap.current[currentPage]) linesMap.current[currentPage] = [];
+    linesMap.current[currentPage].push(currentLine.current);
+    
+    broadcast({ type: 'WB_DRAW', page: currentPage, line: currentLine.current });
+    currentLine.current = null;
+  };
+
+  const drawAllLines = (page: number, activeLine?: Line) => {
+    const ctx = drawCanvasRef.current?.getContext('2d');
+    if (!ctx) return;
+    ctx.clearRect(0, 0, VIRTUAL_W, VIRTUAL_H);
+    ctx.lineCap = 'round';
+    ctx.lineJoin = 'round';
+
+    const lines = linesMap.current[page] || [];
+    const allLines = activeLine ? [...lines, activeLine] : lines;
+
+    allLines.forEach(line => {
+      ctx.beginPath();
+      ctx.strokeStyle = line.color;
+      ctx.lineWidth = line.width;
+      line.points.forEach((p, i) => {
+        if (i === 0) ctx.moveTo(p.x, p.y);
+        else ctx.lineTo(p.x, p.y);
+      });
+      ctx.stroke();
+    });
+  };
+
+  const broadcast = (msg: any) => {
+    room.localParticipant.publishData(new TextEncoder().encode(JSON.stringify(msg)), { reliable: true });
+  };
+
+  const clearPage = () => {
+    linesMap.current[currentPage] = [];
+    drawAllLines(currentPage);
+    broadcast({ type: 'WB_CLEAR', page: currentPage });
+  };
+
+  // ====================== Вставка картинок (Ctrl+V) ======================
+  useEffect(() => {
+    const handlePaste = (e: ClipboardEvent) => {
+      if (!isHost) return;
+      const items = e.clipboardData?.items;
+      if (!items) return;
+      for (let i = 0; i < items.length; i++) {
+        if (items[i].type.indexOf('image') !== -1) {
+          const file = items[i].getAsFile();
+          if (file) {
+             const reader = new FileReader();
+             reader.onload = (ev) => {
+               const img = new Image();
+               img.onload = () => {
+                 const ctx = bgCanvasRef.current?.getContext('2d');
+                 if (ctx) ctx.drawImage(img, 0, 0, VIRTUAL_W, VIRTUAL_H);
+                 // Примечание: для синхронизации картинок нужен серверный upload, 
+                 // пока картинка ложится только на фон хоста.
+               };
+               img.src = ev.target?.result as string;
+             };
+             reader.readAsDataURL(file);
+          }
+        }
+      }
+    };
+    document.addEventListener('paste', handlePaste);
+    return () => document.removeEventListener('paste', handlePaste);
+  }, [isHost]);
+
+  // ====================== Экспорт и Сохранение PDF ======================
+  const saveAndUploadNotes = async () => {
+    if (!pdfBytesRef.current) {
+      alert("Сначала загрузите PDF презентацию!");
+      return;
+    }
+    
+    setUploadProgress(1);
+    try {
+      // 1. Загружаем оригинальный PDF
+      const pdfDoc = await PDFDocument.load(pdfBytesRef.current);
+      
+      // 2. Проходим по всем страницам и "запекаем" рисунки
+      for (let i = 0; i < totalPages; i++) {
+        const pageNum = i + 1;
+        if (linesMap.current[pageNum] && linesMap.current[pageNum].length > 0) {
+          // Отрисовываем линии этой страницы на невидимом холсте
+          const tempCanvas = document.createElement('canvas');
+          tempCanvas.width = VIRTUAL_W;
+          tempCanvas.height = VIRTUAL_H;
+          const ctx = tempCanvas.getContext('2d')!;
+          ctx.lineCap = 'round'; ctx.lineJoin = 'round';
+          
+          linesMap.current[pageNum].forEach(line => {
+            ctx.beginPath();
+            ctx.strokeStyle = line.color;
+            ctx.lineWidth = line.width;
+            line.points.forEach((p, idx) => {
+              if (idx === 0) ctx.moveTo(p.x, p.y);
+              else ctx.lineTo(p.x, p.y);
+            });
+            ctx.stroke();
+          });
+
+          // Переводим холст в PNG и встраиваем в страницу PDF
+          const pngImageBytes = await fetch(tempCanvas.toDataURL()).then(res => res.arrayBuffer());
+          const pngImage = await pdfDoc.embedPng(pngImageBytes);
+          const pdfPage = pdfDoc.getPage(i);
+          const { width, height } = pdfPage.getSize();
+          
+          pdfPage.drawImage(pngImage, {
+            x: 0, y: 0, width: width, height: height, opacity: 1
+          });
+        }
+      }
+
+      // 3. Сохраняем запеченный PDF
+      const pdfBytes = await pdfDoc.save();
+      const blob = new Blob([pdfBytes], { type: 'application/pdf' });
+      
+      // 4. Отправляем чанками в VOD консоль
+      uploadChunked(blob);
+
+    } catch (err) {
+      console.error(err);
+      alert("Ошибка при сохранении PDF");
+      setUploadProgress(0);
     }
   };
 
-  const onDocumentLoadSuccess = ({ numPages }: { numPages: number }) => {
-    setNumPages(numPages);
+  const uploadChunked = async (blob: Blob) => {
+    const CHUNK_SIZE = 5 * 1024 * 1024;
+    const totalChunks = Math.ceil(blob.size / CHUNK_SIZE);
+    const dateStr = new Date().toISOString().replace(/T/, '_').replace(/[:.]/g, '-').slice(0, 19);
+    const filename = `Alverium_Notes_${dateStr}.pdf`;
+
+    for (let i = 0; i < totalChunks; i++) {
+      const start = i * CHUNK_SIZE;
+      const end = Math.min(start + CHUNK_SIZE, blob.size);
+      const fd = new FormData();
+      fd.append('file', blob.slice(start, end));
+      fd.append('filename', filename);
+      fd.append('chunkIndex', String(i));
+      fd.append('totalChunks', String(totalChunks));
+      fd.append('folder', 'common'); // Сохраняем в общую папку
+
+      try {
+        await fetch('https://video.alverium.ru/upload_chunk', { method: 'POST', body: fd });
+        setUploadProgress(Math.round(((i + 1) / totalChunks) * 100));
+      } catch (e) {
+        alert("Ошибка выгрузки конспекта.");
+        setUploadProgress(0);
+        return;
+      }
+    }
+    alert(`Конспект успешно сохранен в VOD консоли как ${filename}!`);
+    setUploadProgress(0);
   };
 
   return (
-    <div className="relative w-full h-full flex bg-[#0a0a0a] overflow-hidden rounded-xl border border-white/5">
+    <div className="relative w-full h-full bg-[#1a1a1a] flex flex-col rounded-xl overflow-hidden shadow-2xl">
       
-      {/* ЛЕВАЯ ПАНЕЛЬ ИНСТРУМЕНТОВ (Показываем ТОЛЬКО преподавателю) */}
+      {/* Панель управления (только для хоста) */}
       {isHost && (
-        <div className="absolute left-4 top-1/2 -translate-y-1/2 z-50 flex flex-col gap-3 bg-[#050505]/90 backdrop-blur-xl p-2 rounded-2xl border border-white/10 shadow-2xl">
-          <button 
-            onClick={() => setActiveTool('cursor')}
-            className={`p-3 rounded-xl transition-all ${activeTool === 'cursor' ? 'bg-red-800 text-white shadow-[0_0_15px_rgba(153,27,27,0.4)]' : 'text-gray-400 hover:bg-white/10 hover:text-white'}`}
-            title="Указатель (Скролл)"
-          >
-            <CursorIcon />
-          </button>
-          <button 
-            onClick={() => setActiveTool('pen')}
-            className={`p-3 rounded-xl transition-all ${activeTool === 'pen' ? 'bg-red-800 text-white shadow-[0_0_15px_rgba(153,27,27,0.4)]' : 'text-gray-400 hover:bg-white/10 hover:text-white'}`}
-            title="Ручка"
-          >
-            <PenIcon />
-          </button>
-          <button 
-            onClick={() => setActiveTool('eraser')}
-            className={`p-3 rounded-xl transition-all ${activeTool === 'eraser' ? 'bg-red-800 text-white shadow-[0_0_15px_rgba(153,27,27,0.4)]' : 'text-gray-400 hover:bg-white/10 hover:text-white'}`}
-            title="Ластик"
-          >
-            <EraserIcon />
-          </button>
+        <div className="absolute top-4 left-1/2 -translate-x-1/2 z-30 flex items-center gap-4 bg-black/80 backdrop-blur-md px-4 py-2 rounded-2xl border border-white/10 shadow-2xl">
+          <label className="cursor-pointer bg-white/10 hover:bg-white/20 text-white text-xs font-bold px-3 py-1.5 rounded-lg transition-all">
+            + PDF
+            <input type="file" accept="application/pdf" className="hidden" onChange={handleFileUpload} />
+          </label>
           
-          <div className="w-full h-[1px] bg-white/10 my-1"></div>
-          
-          <button 
-            onClick={() => fileInputRef.current?.click()}
-            className="p-3 rounded-xl text-gray-400 hover:bg-white/10 hover:text-white transition-all"
-            title="Загрузить PDF"
-          >
-            <UploadIcon />
+          <div className="flex items-center gap-2 text-gray-300 font-mono text-sm">
+            <button disabled={currentPage <= 1} onClick={() => { setCurrentPage(p => p - 1); broadcast({ type: 'WB_PAGE', page: currentPage - 1 }); }} className="px-2 hover:text-white disabled:opacity-50">◀</button>
+            <span>{currentPage} / {totalPages}</span>
+            <button disabled={currentPage >= totalPages} onClick={() => { setCurrentPage(p => p + 1); broadcast({ type: 'WB_PAGE', page: currentPage + 1 }); }} className="px-2 hover:text-white disabled:opacity-50">▶</button>
+          </div>
+
+          <button onClick={clearPage} className="text-red-400 hover:text-red-300 text-xs font-bold px-2 uppercase transition-colors">Очистить</button>
+          <button onClick={saveAndUploadNotes} className="bg-red-800 hover:bg-red-700 text-white text-xs font-bold px-3 py-1.5 rounded-lg shadow-[0_0_10px_rgba(153,27,27,0.5)] transition-all">
+            {uploadProgress > 0 ? `Сохранение: ${uploadProgress}%` : '💾 В LMS'}
           </button>
-          <input 
-            type="file" 
-            accept="application/pdf" 
-            ref={fileInputRef} 
-            onChange={onFileChange} 
-            className="hidden" 
+        </div>
+      )}
+
+      {/* Контейнер холста (сохраняет пропорции 16:9) */}
+      <div ref={containerRef} className="flex-1 w-full h-full p-4 flex items-center justify-center relative touch-none">
+        <div className="relative shadow-2xl bg-white" style={{ aspectRatio: '16/9', maxHeight: '100%', maxWidth: '100%' }}>
+          
+          {/* Слой 1: Фон (PDF или картинка) */}
+          <canvas ref={bgCanvasRef} width={VIRTUAL_W} height={VIRTUAL_H} className="absolute inset-0 w-full h-full object-contain pointer-events-none rounded-lg" />
+          
+          {/* Слой 2: Рисование */}
+          <canvas
+            ref={drawCanvasRef}
+            width={VIRTUAL_W}
+            height={VIRTUAL_H}
+            onPointerDown={onPointerDown}
+            onPointerMove={onPointerMove}
+            onPointerUp={onPointerUp}
+            onPointerOut={onPointerUp}
+            className={`absolute inset-0 w-full h-full object-contain rounded-lg ${isHost ? 'cursor-crosshair' : 'pointer-events-none'}`}
+            style={{ touchAction: 'none' }}
           />
         </div>
-      )}
-
-      {/* ЦЕНТРАЛЬНАЯ ОБЛАСТЬ */}
-      <div className="flex-1 w-full h-full flex items-center justify-center relative overflow-auto custom-scrollbar">
-        {!pdfFile ? (
-          <div className="flex flex-col items-center justify-center text-gray-500 gap-4">
-            {isHost ? (
-              <>
-                <UploadIcon />
-                <p className="font-light tracking-wide text-sm">Загрузите PDF для начала урока</p>
-                <button 
-                  onClick={() => fileInputRef.current?.click()}
-                  className="mt-2 px-6 py-2 bg-white/5 hover:bg-white/10 border border-white/10 rounded-lg text-xs font-medium text-white transition-all"
-                >
-                  Выбрать файл
-                </button>
-              </>
-            ) : (
-              <p className="font-light tracking-wide text-sm animate-pulse">Ожидаем презентацию преподавателя...</p>
-            )}
-          </div>
-        ) : (
-          <div className="relative shadow-2xl transition-all duration-300">
-            <Document
-              file={pdfFile}
-              onLoadSuccess={onDocumentLoadSuccess}
-              loading={<div className="text-white/50 text-sm font-light animate-pulse">Загрузка документа...</div>}
-              className="flex items-center justify-center"
-            >
-              <Page 
-                pageNumber={pageNumber} 
-                renderTextLayer={false}
-                renderAnnotationLayer={false}
-                className="rounded-md overflow-hidden"
-                width={800}
-              />
-            </Document>
-            <div className={`absolute inset-0 z-10 ${activeTool === 'cursor' ? 'pointer-events-none' : 'cursor-crosshair'}`}>
-              {/* Тут будет perfect-freehand */}
-            </div>
-          </div>
-        )}
       </div>
-
-      {/* ПАНЕЛЬ ПАГИНАЦИИ */}
-      {pdfFile && (
-        <div className="absolute bottom-6 left-1/2 -translate-x-1/2 z-50 flex items-center gap-4 bg-[#050505]/90 backdrop-blur-xl px-4 py-2 rounded-full border border-white/10 shadow-2xl">
-          <button 
-            disabled={!isHost || pageNumber <= 1}
-            onClick={() => setPageNumber(p => p - 1)}
-            className="text-gray-400 hover:text-white disabled:opacity-30 disabled:hover:text-gray-400 font-bold px-2 transition-all"
-          >
-            &larr;
-          </button>
-          <span className="text-xs font-medium text-gray-300 tracking-widest">
-            {pageNumber} <span className="text-gray-600">/</span> {numPages}
-          </span>
-          <button 
-            disabled={!isHost || pageNumber >= numPages}
-            onClick={() => setPageNumber(p => p + 1)}
-            className="text-gray-400 hover:text-white disabled:opacity-30 disabled:hover:text-gray-400 font-bold px-2 transition-all"
-          >
-            &rarr;
-          </button>
-        </div>
-      )}
     </div>
   );
 }
