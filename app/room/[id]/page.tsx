@@ -30,7 +30,7 @@ const CloseIcon = () => (<svg viewBox="0 0 24 24" fill="none" stroke="currentCol
 const MuteIcon = () => (<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" className="w-4 h-4"><path strokeLinecap="round" strokeLinejoin="round" d="M12 18.75a6 6 0 006-6v-1.5m-6 7.5a6 6 0 01-6-6v-1.5m6 7.5v3.75m-3.75 0h7.5M12 15.75a3 3 0 01-3-3V4.5a3 3 0 116 0v8.25a3 3 0 01-3 3z" /><line x1="3" y1="3" x2="21" y2="21" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round"/></svg>);
 const KickIcon = () => (<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" className="w-4 h-4"><path strokeLinecap="round" strokeLinejoin="round" d="M15.75 9V5.25A2.25 2.25 0 0013.5 3h-6a2.25 2.25 0 00-2.25 2.25v13.5A2.25 2.25 0 007.5 21h6a2.25 2.25 0 002.25-2.25V15M12 9l-3 3m0 0l3 3m-3-3h12.75" /></svg>);
 
-// ПЛАВАЮЩЕЕ ВИДЕО ДЛЯ ДОСКИ И ЭКРАНА
+// ПЛАВАЮЩЕЕ ВИДЕО ДЛЯ ДОСКИ И ЭКРАНА (Только для Спикера)
 function DraggableCameras({ tracks }: { tracks: any[] }) {
   const [pos, setPos] = useState({ x: 20, y: 20 });
   const dragRef = useRef({ dragging: false, startX: 0, startY: 0 });
@@ -219,6 +219,9 @@ function AlveriumStage() {
   const [isHost, setIsHost] = useState(false);
   const [isRecording, setIsRecording] = useState(false);
   const [uploadProgress, setUploadProgress] = useState(0);
+  
+  // Добавляем ID хоста, чтобы отфильтровать камеры
+  const [hostIdentity, setHostIdentity] = useState<string | null>(null);
 
   const mediaRecorderRef = useRef<MediaRecorder | null>(null);
   const recordedChunksRef = useRef<Blob[]>([]);
@@ -229,19 +232,36 @@ function AlveriumStage() {
 
   useEffect(() => { setIsHost(parseJwtAdmin(token)); }, [token]);
 
+  // FIX: Определяем, кто в комнате Хост
   useEffect(() => {
-    const handleParticipantConnected = () => {
-      if (isHost && isWhiteboardOpen) setTimeout(() => room.localParticipant.publishData(new TextEncoder().encode(JSON.stringify({ type: 'WHITEBOARD_TOGGLE', isOpen: true })), { reliable: true }), 1000);
+    const handleParticipantConnected = (p: any) => {
+      // Ищем в метадате или имени маркер администратора.
+      // Если мы сами хост, мы можем заявить об этом всем.
+      if (isHost && isWhiteboardOpen) {
+        setTimeout(() => room.localParticipant.publishData(new TextEncoder().encode(JSON.stringify({ type: 'WHITEBOARD_TOGGLE', isOpen: true, hostId: room.localParticipant.identity })), { reliable: true }), 1000);
+      }
     };
+    
+    // Если мы сами заходим и мы хост
+    if (isHost) {
+      setHostIdentity(room.localParticipant.identity);
+    }
+
     room.on(RoomEvent.ParticipantConnected, handleParticipantConnected);
     return () => { room.off(RoomEvent.ParticipantConnected, handleParticipantConnected); };
   }, [room, isHost, isWhiteboardOpen]);
 
   useEffect(() => {
-    const handleData = (payload: Uint8Array) => {
+    const handleData = (payload: Uint8Array, participant?: any) => {
       try {
         const msg = JSON.parse(new TextDecoder().decode(payload));
-        if (msg.type === 'WHITEBOARD_TOGGLE') setIsWhiteboardOpen(msg.isOpen);
+        if (msg.type === 'WHITEBOARD_TOGGLE') {
+          setIsWhiteboardOpen(msg.isOpen);
+          // Ученик запоминает ID хоста
+          if (msg.hostId) setHostIdentity(msg.hostId);
+          // Или если сигнал пришел от конкретного участника, считаем его хостом
+          else if (participant) setHostIdentity(participant.identity);
+        }
         else if (msg.type === 'FORCE_MUTE' && msg.target === room.localParticipant.identity) room.localParticipant.setMicrophoneEnabled(false);
         else if (msg.type === 'KICK' && msg.target === room.localParticipant.identity) { alert("Удалены."); room.disconnect(); }
       } catch (e) { }
@@ -252,7 +272,10 @@ function AlveriumStage() {
 
   const toggleWhiteboard = () => {
     const newState = !isWhiteboardOpen; setIsWhiteboardOpen(newState);
-    if (isHost) room.localParticipant.publishData(new TextEncoder().encode(JSON.stringify({ type: 'WHITEBOARD_TOGGLE', isOpen: newState })), { reliable: true });
+    if (isHost) {
+      setHostIdentity(room.localParticipant.identity);
+      room.localParticipant.publishData(new TextEncoder().encode(JSON.stringify({ type: 'WHITEBOARD_TOGGLE', isOpen: newState, hostId: room.localParticipant.identity })), { reliable: true });
+    }
   };
 
   const startRecording = async () => {
@@ -291,6 +314,15 @@ function AlveriumStage() {
   const cameraTracks = useTracks([Track.Source.Camera], { onlySubscribed: false });
   const hasScreenShare = screenTracks.length > 0;
 
+  // ФИЛЬТРАЦИЯ: Оставляем только камеру спикера (Хоста) для плавающего окна
+  const speakerCameraTracks = cameraTracks.filter(track => {
+    // Если хост определен, показываем только его. Иначе показываем всех (на всякий случай)
+    if (hostIdentity) {
+      return track.participant.identity === hostIdentity;
+    }
+    return true; 
+  });
+
   return (
     <div className="flex flex-col h-[100dvh] bg-[#000000] text-white relative">
       <header className="flex justify-between px-4 py-3 bg-[#050505]/80 border-b border-white/5 z-20 shrink-0">
@@ -316,8 +348,8 @@ function AlveriumStage() {
             <div className="absolute inset-0 p-2 md:p-4"><GridLayout tracks={cameraTracks} style={{ height: '100%' }}><ParticipantTile /></GridLayout></div>
           )}
 
-          {/* ПЛАВАЮЩЕЕ ОКНО КАМЕР ДЛЯ ДОСКИ И ЭКРАНА */}
-          {(isWhiteboardOpen || hasScreenShare) && <DraggableCameras tracks={cameraTracks} />}
+          {/* ПЛАВАЮЩЕЕ ОКНО: теперь только Спикер */}
+          {(isWhiteboardOpen || hasScreenShare) && <DraggableCameras tracks={speakerCameraTracks} />}
         </div>
         <AlveriumSidebar isOpen={isSidebarOpen} onClose={() => setIsSidebarOpen(false)} isHost={isHost} />
       </main>
