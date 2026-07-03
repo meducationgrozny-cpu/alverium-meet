@@ -89,7 +89,6 @@ export default function AlveriumWhiteboard({ isHost }: { isHost: boolean }) {
     try {
       const page = await pdfDocRef.current.getPage(pageNum);
       
-      // ИСПРАВЛЕНИЕ: Динамический расчет масштаба, чтобы слайд вписался в 1920x1080
       const unscaledViewport = page.getViewport({ scale: 1.0 });
       const scale = Math.min(VIRTUAL_W / unscaledViewport.width, VIRTUAL_H / unscaledViewport.height);
       const viewport = page.getViewport({ scale });
@@ -101,14 +100,13 @@ export default function AlveriumWhiteboard({ isHost }: { isHost: boolean }) {
       ctx.fillStyle = '#ffffff';
       ctx.fillRect(0, 0, VIRTUAL_W, VIRTUAL_H);
 
-      // Центрируем PDF на холсте
       const offsetX = (VIRTUAL_W - viewport.width) / 2;
       const offsetY = (VIRTUAL_H - viewport.height) / 2;
 
       const renderContext: any = { 
         canvasContext: ctx, 
         viewport: viewport,
-        transform: [1, 0, 0, 1, offsetX, offsetY] // Применяем центрирование
+        transform: [1, 0, 0, 1, offsetX, offsetY]
       };
       await page.render(renderContext).promise;
     } catch (err) {
@@ -122,7 +120,7 @@ export default function AlveriumWhiteboard({ isHost }: { isHost: boolean }) {
 
     try {
         const arrayBuffer = await file.arrayBuffer();
-        pdfBytesRef.current = arrayBuffer;
+        pdfBytesRef.current = arrayBuffer.slice(0);
         
         const loadingTask = pdfjsLib.getDocument({ data: arrayBuffer });
         const pdf = await loadingTask.promise;
@@ -134,7 +132,7 @@ export default function AlveriumWhiteboard({ isHost }: { isHost: boolean }) {
         setRenderTrigger(prev => prev + 1);
         broadcast({ type: 'WB_PAGE', page: 1 });
     } catch (err) {
-        alert("Ошибка чтения PDF. Убедитесь, что файл не поврежден: " + err);
+        alert("Ошибка чтения PDF: " + err);
     }
   };
 
@@ -322,7 +320,7 @@ export default function AlveriumWhiteboard({ isHost }: { isHost: boolean }) {
   };
 
   return (
-    <div className="relative w-full h-full bg-[#1a1a1a] flex flex-col rounded-xl overflow-hidden shadow-2xl">
+    <div className="relative w-full h-full min-h-[350px] md:min-h-0 bg-[#1a1a1a] flex flex-col rounded-xl overflow-hidden shadow-2xl">
       {isHost && (
         <div className="absolute top-4 left-1/2 -translate-x-1/2 z-30 flex items-center gap-4 bg-black/80 backdrop-blur-md px-4 py-2 rounded-2xl border border-white/10 shadow-2xl">
           <label className="cursor-pointer bg-white/10 hover:bg-white/20 text-white text-xs font-bold px-3 py-1.5 rounded-lg transition-all">
@@ -343,9 +341,9 @@ export default function AlveriumWhiteboard({ isHost }: { isHost: boolean }) {
         </div>
       )}
 
-      <div ref={containerRef} className="flex-1 w-full h-full p-4 flex items-center justify-center relative touch-none">
-        <div className="relative shadow-2xl bg-white w-full max-w-full mx-auto flex-shrink-0" style={{ aspectRatio: '16/9', maxHeight: '100%' }}>
-          <canvas ref={bgCanvasRef} width={VIRTUAL_W} height={VIRTUAL_H} className="absolute inset-0 w-full h-full object-contain pointer-events-none rounded-lg" />
+      <div ref={containerRef} className="flex-1 w-full h-full p-2 sm:p-4 flex items-center justify-center relative touch-none">
+        <div className="relative shadow-2xl bg-white w-full aspect-video max-w-full max-h-full mx-auto flex-shrink-0 rounded-lg overflow-hidden">
+          <canvas ref={bgCanvasRef} width={VIRTUAL_W} height={VIRTUAL_H} className="absolute inset-0 w-full h-full object-contain pointer-events-none" />
           <canvas
             ref={drawCanvasRef}
             width={VIRTUAL_W}
@@ -354,7 +352,7 @@ export default function AlveriumWhiteboard({ isHost }: { isHost: boolean }) {
             onPointerMove={onPointerMove}
             onPointerUp={onPointerUp}
             onPointerOut={onPointerUp}
-            className={`absolute inset-0 w-full h-full object-contain rounded-lg ${isHost ? 'cursor-crosshair' : 'pointer-events-none'}`}
+            className={`absolute inset-0 w-full h-full object-contain ${isHost ? 'cursor-crosshair' : 'pointer-events-none'}`}
             style={{ touchAction: 'none' }}
           />
         </div>
