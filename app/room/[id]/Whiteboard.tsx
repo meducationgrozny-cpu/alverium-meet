@@ -7,7 +7,8 @@ import * as pdfjsLib from 'pdfjs-dist';
 import { PDFDocument } from 'pdf-lib';
 
 if (typeof window !== 'undefined') {
-  pdfjsLib.GlobalWorkerOptions.workerSrc = `https://cdnjs.cloudflare.com/ajax/libs/pdf.js/${pdfjsLib.version}/pdf.worker.min.js`;
+  // Надежный воркер с unpkg
+  pdfjsLib.GlobalWorkerOptions.workerSrc = `https://unpkg.com/pdfjs-dist@${pdfjsLib.version}/build/pdf.worker.min.js`;
 }
 
 interface Point { x: number; y: number; }
@@ -26,6 +27,9 @@ export default function AlveriumWhiteboard({ isHost }: { isHost: boolean }) {
   const [totalPages, setTotalPages] = useState(1);
   const [isDrawing, setIsDrawing] = useState(false);
   const [uploadProgress, setUploadProgress] = useState(0);
+  
+  // FIX: Принудительный триггер для рендера
+  const [renderTrigger, setRenderTrigger] = useState(0);
 
   const linesMap = useRef<Record<number, Line[]>>({});
   const currentLine = useRef<Line | null>(null);
@@ -56,7 +60,7 @@ export default function AlveriumWhiteboard({ isHost }: { isHost: boolean }) {
   useEffect(() => {
     if (pdfDocRef.current) renderPdfPage(currentPage);
     drawAllLines(currentPage);
-  }, [currentPage]);
+  }, [currentPage, renderTrigger]); // <-- Триггер добавлен в зависимости
 
   const renderPdfPage = async (pageNum: number) => {
     if (!pdfDocRef.current || !bgCanvasRef.current) return;
@@ -78,17 +82,23 @@ export default function AlveriumWhiteboard({ isHost }: { isHost: boolean }) {
     const file = e.target.files?.[0];
     if (!file || !isHost) return;
 
-    const arrayBuffer = await file.arrayBuffer();
-    pdfBytesRef.current = arrayBuffer;
-    
-    const loadingTask = pdfjsLib.getDocument({ data: arrayBuffer });
-    const pdf = await loadingTask.promise;
-    
-    pdfDocRef.current = pdf;
-    setTotalPages(pdf.numPages);
-    setCurrentPage(1);
-    
-    broadcast({ type: 'WB_PAGE', page: 1 });
+    try {
+        const arrayBuffer = await file.arrayBuffer();
+        pdfBytesRef.current = arrayBuffer;
+        
+        const loadingTask = pdfjsLib.getDocument({ data: arrayBuffer });
+        const pdf = await loadingTask.promise;
+        
+        pdfDocRef.current = pdf;
+        setTotalPages(pdf.numPages);
+        setCurrentPage(1);
+        
+        // FIX: Дергаем триггер, чтобы холст обновился даже если мы были на 1 странице
+        setRenderTrigger(prev => prev + 1);
+        broadcast({ type: 'WB_PAGE', page: 1 });
+    } catch (err) {
+        alert("Ошибка чтения PDF файла: " + err);
+    }
   };
 
   const getCoords = (e: React.PointerEvent) => {
@@ -231,7 +241,6 @@ export default function AlveriumWhiteboard({ isHost }: { isHost: boolean }) {
       }
 
       const pdfBytes = await pdfDoc.save();
-      // FIX: Принудительно отключаем проверку типов для создания Blob
       const blob = new Blob([pdfBytes as any], { type: 'application/pdf' });
       
       uploadChunked(blob);
