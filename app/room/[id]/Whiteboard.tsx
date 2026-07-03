@@ -7,8 +7,8 @@ import * as pdfjsLib from 'pdfjs-dist';
 import { PDFDocument } from 'pdf-lib';
 
 if (typeof window !== 'undefined') {
-  // Надежный воркер с unpkg
-  pdfjsLib.GlobalWorkerOptions.workerSrc = `https://unpkg.com/pdfjs-dist@${pdfjsLib.version}/build/pdf.worker.min.js`;
+  // Надежный CDN jsdelivr с поддержкой .mjs модулей для 5-й версии
+  pdfjsLib.GlobalWorkerOptions.workerSrc = `https://cdn.jsdelivr.net/npm/pdfjs-dist@${pdfjsLib.version}/build/pdf.worker.min.mjs`;
 }
 
 interface Point { x: number; y: number; }
@@ -28,7 +28,6 @@ export default function AlveriumWhiteboard({ isHost }: { isHost: boolean }) {
   const [isDrawing, setIsDrawing] = useState(false);
   const [uploadProgress, setUploadProgress] = useState(0);
   
-  // FIX: Принудительный триггер для рендера
   const [renderTrigger, setRenderTrigger] = useState(0);
 
   const linesMap = useRef<Record<number, Line[]>>({});
@@ -60,7 +59,7 @@ export default function AlveriumWhiteboard({ isHost }: { isHost: boolean }) {
   useEffect(() => {
     if (pdfDocRef.current) renderPdfPage(currentPage);
     drawAllLines(currentPage);
-  }, [currentPage, renderTrigger]); // <-- Триггер добавлен в зависимости
+  }, [currentPage, renderTrigger]); 
 
   const renderPdfPage = async (pageNum: number) => {
     if (!pdfDocRef.current || !bgCanvasRef.current) return;
@@ -93,7 +92,6 @@ export default function AlveriumWhiteboard({ isHost }: { isHost: boolean }) {
         setTotalPages(pdf.numPages);
         setCurrentPage(1);
         
-        // FIX: Дергаем триггер, чтобы холст обновился даже если мы были на 1 странице
         setRenderTrigger(prev => prev + 1);
         broadcast({ type: 'WB_PAGE', page: 1 });
     } catch (err) {
