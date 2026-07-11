@@ -44,6 +44,7 @@ export default function AlveriumWhiteboard({ isHost }: { isHost: boolean }) {
 
   const [isDrawing, setIsDrawing] = useState(false);
   const [uploadProgress, setUploadProgress] = useState(0);
+  const [isToolbarOpen, setIsToolbarOpen] = useState(true);
 
   const linesMap = useRef<Record<number, Line[]>>({});
   const currentLine = useRef<Line | null>(null);
@@ -150,15 +151,32 @@ export default function AlveriumWhiteboard({ isHost }: { isHost: boolean }) {
     if (!file || !isHost) return;
     setUploadProgress(1);
     try {
-        const fd = new FormData(); fd.append('file', file);
+        const fd = new FormData(); 
+        fd.append('file', file);
+        
+        // Отправка на наш новый локальный прокси
         const res = await fetch('/api/proxy-pdf', { method: 'POST', body: fd });
-        const data = await res.json();
+        const text = await res.text();
+        
+        let data;
+        try { 
+          data = JSON.parse(text); 
+        } catch(e) { 
+          throw new Error(`Next.js вернул не JSON. Статус: ${res.status}. Ответ: ${text.substring(0, 100)}`); 
+        }
+
         if (data.status === 'success') {
            setTotalPages(data.pages); setSlideBaseUrl(data.slide_base_url); setCurrentPage(1);
            broadcast({ type: 'WB_SLIDES', baseUrl: data.slide_base_url, pages: data.pages, page: 1 });
-        } else alert("Ошибка сервера: " + data.message);
-    } catch (err) { alert("Сетевая ошибка загрузки PDF."); }
-    finally { setUploadProgress(0); }
+        } else {
+           alert("Ответ сервера (ошибка): " + (data.message || JSON.stringify(data)));
+        }
+    } catch (err: any) { 
+        // ТЕПЕРЬ ОШИБКА БУДЕТ ВЫВЕДЕНА ПОДРОБНО
+        alert("Детальная системная ошибка:\n" + err.message); 
+    } finally { 
+        setUploadProgress(0); 
+    }
   };
 
   const getCoords = (e: React.PointerEvent) => {
@@ -248,43 +266,52 @@ export default function AlveriumWhiteboard({ isHost }: { isHost: boolean }) {
   return (
     <div className="w-full h-full relative overflow-hidden bg-[#0a0a0a]">
       {isHost && (
-        <div className="absolute top-4 left-1/2 -translate-x-1/2 z-30 flex items-center bg-black/80 backdrop-blur-md px-3 py-2 rounded-2xl border border-white/10 shadow-[0_10px_30px_rgba(0,0,0,0.8)]">
-          <div className="flex gap-1 pr-3 border-r border-white/10">
-            <button onClick={() => setTool('pen')} className={`p-2.5 rounded-xl transition ${tool === 'pen' ? 'bg-red-600 text-white' : 'text-gray-400 hover:text-white hover:bg-white/10'}`}><Icons.Pen /></button>
-            <button onClick={() => setTool('highlighter')} className={`p-2.5 rounded-xl transition ${tool === 'highlighter' ? 'bg-red-600 text-white' : 'text-gray-400 hover:text-white hover:bg-white/10'}`}><Icons.Highlighter /></button>
-            <button onClick={() => setTool('eraser')} className={`p-2.5 rounded-xl transition ${tool === 'eraser' ? 'bg-red-600 text-white' : 'text-gray-400 hover:text-white hover:bg-white/10'}`}><Icons.Eraser /></button>
-            <button onClick={() => setTool('laser')} className={`p-2.5 rounded-xl transition ${tool === 'laser' ? 'bg-blue-600 text-white' : 'text-gray-400 hover:text-white hover:bg-white/10'}`}><Icons.Laser /></button>
-          </div>
-          <div className={`grid grid-cols-6 gap-1.5 px-3 border-r border-white/10 ${tool === 'eraser' || tool === 'laser' ? 'opacity-30 pointer-events-none' : ''}`}>
-            {COLORS.map(c => (
-              <button key={c} onClick={() => setColor(c)} className={`w-5 h-5 rounded-full border-[1.5px] transition-transform ${color === c ? 'border-white scale-125' : 'border-transparent'}`} style={{ backgroundColor: c }} />
-            ))}
-          </div>
-          <div className={`flex gap-1 px-3 border-r border-white/10 ${tool === 'laser' ? 'opacity-30 pointer-events-none' : ''}`}>
-            {WIDTHS.map((w, i) => (
-              <button key={w} onClick={() => setThickness(w)} className={`p-2 rounded-xl flex items-center justify-center transition ${thickness === w ? 'bg-white/20 text-white' : 'text-gray-400 hover:text-white'}`}>
-                {i === 0 && <Icons.WidthThin />}
-                {i === 1 && <Icons.WidthMed />}
-                {i === 2 && <Icons.WidthThick />}
-              </button>
-            ))}
-          </div>
-          <div className="pl-3">
-            <button onClick={clearPage} className="p-2.5 text-gray-400 hover:text-red-400 hover:bg-red-500/10 rounded-xl transition"><Icons.Trash /></button>
+        <div className="absolute top-4 left-1/2 -translate-x-1/2 z-40 flex flex-col items-center gap-2 transition-all duration-300">
+          <button 
+            onClick={() => setIsToolbarOpen(!isToolbarOpen)} 
+            className="bg-white/10 hover:bg-white/20 text-gray-300 hover:text-white px-4 py-1.5 rounded-full text-[10px] font-bold uppercase tracking-wider backdrop-blur-md transition-all border border-white/5 shadow-lg"
+          >
+            {isToolbarOpen ? 'Скрыть инструменты ▴' : 'Инструменты ▾'}
+          </button>
+          
+          <div className={`transition-all duration-300 origin-top flex items-center bg-[#0a0a0a]/90 backdrop-blur-xl px-4 py-3 rounded-2xl border border-white/10 shadow-[0_20px_40px_rgba(0,0,0,0.8)] ${isToolbarOpen ? 'scale-100 opacity-100 translate-y-0' : 'scale-95 opacity-0 -translate-y-4 pointer-events-none'}`}>
+            <div className="flex gap-1 pr-4 border-r border-white/10">
+              <button onClick={() => setTool('pen')} className={`p-2.5 rounded-xl transition ${tool === 'pen' ? 'bg-red-600 text-white' : 'text-gray-400 hover:text-white hover:bg-white/10'}`}><Icons.Pen /></button>
+              <button onClick={() => setTool('highlighter')} className={`p-2.5 rounded-xl transition ${tool === 'highlighter' ? 'bg-red-600 text-white' : 'text-gray-400 hover:text-white hover:bg-white/10'}`}><Icons.Highlighter /></button>
+              <button onClick={() => setTool('eraser')} className={`p-2.5 rounded-xl transition ${tool === 'eraser' ? 'bg-red-600 text-white' : 'text-gray-400 hover:text-white hover:bg-white/10'}`}><Icons.Eraser /></button>
+              <button onClick={() => setTool('laser')} className={`p-2.5 rounded-xl transition ${tool === 'laser' ? 'bg-blue-600 text-white' : 'text-gray-400 hover:text-white hover:bg-white/10'}`}><Icons.Laser /></button>
+            </div>
+            <div className={`grid grid-cols-6 gap-2 px-4 border-r border-white/10 ${tool === 'eraser' || tool === 'laser' ? 'opacity-30 pointer-events-none' : ''}`}>
+              {COLORS.map(c => (
+                <button key={c} onClick={() => setColor(c)} className={`w-5 h-5 rounded-full border-[1.5px] transition-transform ${color === c ? 'border-white scale-125' : 'border-transparent'}`} style={{ backgroundColor: c }} />
+              ))}
+            </div>
+            <div className={`flex gap-1 px-4 border-r border-white/10 ${tool === 'laser' ? 'opacity-30 pointer-events-none' : ''}`}>
+              {WIDTHS.map((w, i) => (
+                <button key={w} onClick={() => setThickness(w)} className={`p-2 rounded-xl flex items-center justify-center transition ${thickness === w ? 'bg-white/20 text-white' : 'text-gray-400 hover:text-white hover:bg-white/10'}`}>
+                  {i === 0 && <Icons.WidthThin />}
+                  {i === 1 && <Icons.WidthMed />}
+                  {i === 2 && <Icons.WidthThick />}
+                </button>
+              ))}
+            </div>
+            <div className="pl-4">
+              <button onClick={clearPage} className="p-2.5 text-gray-400 hover:text-red-400 hover:bg-red-500/10 rounded-xl transition"><Icons.Trash /></button>
+            </div>
           </div>
         </div>
       )}
 
       {isHost && (
-        <div className="absolute bottom-4 left-1/2 -translate-x-1/2 z-30 flex items-center gap-4 bg-black/80 backdrop-blur-md px-4 py-2 rounded-2xl border border-white/10 shadow-[0_10px_30px_rgba(0,0,0,0.8)]">
-          <label className="cursor-pointer bg-white/10 hover:bg-white/20 text-white text-xs font-bold px-3 py-1.5 rounded-lg transition-all flex items-center gap-2">
+        <div className="absolute bottom-4 left-1/2 -translate-x-1/2 z-30 flex items-center gap-4 bg-[#0a0a0a]/90 backdrop-blur-xl px-4 py-2.5 rounded-2xl border border-white/10 shadow-[0_10px_30px_rgba(0,0,0,0.8)]">
+          <label className="cursor-pointer bg-white/10 hover:bg-white/20 text-white text-xs font-bold px-4 py-2 rounded-xl transition-all flex items-center gap-2">
             {uploadProgress > 0 ? 'Загрузка...' : '+ Загрузить PDF'}
             <input type="file" accept="application/pdf" className="hidden" disabled={uploadProgress > 0} onChange={handleFileUpload} />
           </label>
-          <div className="flex items-center gap-2 text-gray-300 font-mono text-sm">
-            <button disabled={currentPage <= 1} onClick={() => { setCurrentPage(p => p - 1); broadcast({ type: 'WB_PAGE', page: currentPage - 1 }); }} className="px-2 hover:text-white disabled:opacity-50">◀</button>
+          <div className="flex items-center gap-3 text-gray-300 font-mono text-sm">
+            <button disabled={currentPage <= 1} onClick={() => { setCurrentPage(p => p - 1); broadcast({ type: 'WB_PAGE', page: currentPage - 1 }); }} className="p-1 hover:text-white hover:bg-white/10 rounded-lg transition disabled:opacity-50">◀</button>
             <span>{currentPage} / {totalPages}</span>
-            <button disabled={currentPage >= totalPages} onClick={() => { setCurrentPage(p => p + 1); broadcast({ type: 'WB_PAGE', page: currentPage + 1 }); }} className="px-2 hover:text-white disabled:opacity-50">▶</button>
+            <button disabled={currentPage >= totalPages} onClick={() => { setCurrentPage(p => p + 1); broadcast({ type: 'WB_PAGE', page: currentPage + 1 }); }} className="p-1 hover:text-white hover:bg-white/10 rounded-lg transition disabled:opacity-50">▶</button>
           </div>
         </div>
       )}
