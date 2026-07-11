@@ -146,15 +146,13 @@ export default function AlveriumWhiteboard({ isHost }: { isHost: boolean }) {
 
   useEffect(() => { drawAllLines(currentPage); }, [currentPage, boardSize]);
 
-  const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (!file || !isHost) return;
+  // ОБЩАЯ ЛОГИКА ОТПРАВКИ ФАЙЛА (для PDF и Скриншотов)
+  const uploadFileToVOD = async (file: File | Blob) => {
     setUploadProgress(1);
     try {
         const fd = new FormData(); 
         fd.append('file', file);
         
-        // Отправка на наш новый локальный прокси
         const res = await fetch('/api/proxy-pdf', { method: 'POST', body: fd });
         const text = await res.text();
         
@@ -172,12 +170,35 @@ export default function AlveriumWhiteboard({ isHost }: { isHost: boolean }) {
            alert("Ответ сервера (ошибка): " + (data.message || JSON.stringify(data)));
         }
     } catch (err: any) { 
-        // ТЕПЕРЬ ОШИБКА БУДЕТ ВЫВЕДЕНА ПОДРОБНО
         alert("Детальная системная ошибка:\n" + err.message); 
     } finally { 
         setUploadProgress(0); 
     }
   };
+
+  const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file || !isHost) return;
+    uploadFileToVOD(file);
+  };
+
+  // ПЕРЕХВАТЧИК ВСТАВКИ (Ctrl+V скриншотов)
+  useEffect(() => {
+    const handlePaste = (e: ClipboardEvent) => {
+      if (!isHost) return;
+      const items = e.clipboardData?.items;
+      if (!items) return;
+      for (let i = 0; i < items.length; i++) {
+        if (items[i].type.indexOf('image') !== -1) {
+          const blob = items[i].getAsFile();
+          if (blob) uploadFileToVOD(blob);
+          break;
+        }
+      }
+    };
+    window.addEventListener('paste', handlePaste);
+    return () => window.removeEventListener('paste', handlePaste);
+  }, [isHost]);
 
   const getCoords = (e: React.PointerEvent) => {
     if (!activeCanvasRef.current) return { x: 0, y: 0 };
@@ -304,9 +325,9 @@ export default function AlveriumWhiteboard({ isHost }: { isHost: boolean }) {
 
       {isHost && (
         <div className="absolute bottom-4 left-1/2 -translate-x-1/2 z-30 flex items-center gap-4 bg-[#0a0a0a]/90 backdrop-blur-xl px-4 py-2.5 rounded-2xl border border-white/10 shadow-[0_10px_30px_rgba(0,0,0,0.8)]">
-          <label className="cursor-pointer bg-white/10 hover:bg-white/20 text-white text-xs font-bold px-4 py-2 rounded-xl transition-all flex items-center gap-2">
-            {uploadProgress > 0 ? 'Загрузка...' : '+ Загрузить PDF'}
-            <input type="file" accept="application/pdf" className="hidden" disabled={uploadProgress > 0} onChange={handleFileUpload} />
+          <label className="cursor-pointer bg-white/10 hover:bg-white/20 text-white text-xs font-bold px-4 py-2 rounded-xl transition-all flex items-center gap-2" title="Или сделайте скриншот и нажмите Ctrl+V">
+            {uploadProgress > 0 ? 'Загрузка...' : '+ Файл / Скриншот'}
+            <input type="file" accept="application/pdf,image/png,image/jpeg,image/webp" className="hidden" disabled={uploadProgress > 0} onChange={handleFileUpload} />
           </label>
           <div className="flex items-center gap-3 text-gray-300 font-mono text-sm">
             <button disabled={currentPage <= 1} onClick={() => { setCurrentPage(p => p - 1); broadcast({ type: 'WB_PAGE', page: currentPage - 1 }); }} className="p-1 hover:text-white hover:bg-white/10 rounded-lg transition disabled:opacity-50">◀</button>
