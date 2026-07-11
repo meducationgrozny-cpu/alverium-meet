@@ -146,7 +146,6 @@ export default function AlveriumWhiteboard({ isHost }: { isHost: boolean }) {
 
   useEffect(() => { drawAllLines(currentPage); }, [currentPage, boardSize]);
 
-  // ОБЩАЯ ЛОГИКА ОТПРАВКИ ФАЙЛА (для PDF и Скриншотов)
   const uploadFileToVOD = async (file: File | Blob) => {
     setUploadProgress(1);
     try {
@@ -182,7 +181,6 @@ export default function AlveriumWhiteboard({ isHost }: { isHost: boolean }) {
     uploadFileToVOD(file);
   };
 
-  // ПЕРЕХВАТЧИК ВСТАВКИ (Ctrl+V скриншотов)
   useEffect(() => {
     const handlePaste = (e: ClipboardEvent) => {
       if (!isHost) return;
@@ -337,19 +335,27 @@ export default function AlveriumWhiteboard({ isHost }: { isHost: boolean }) {
         </div>
       )}
 
-      <div className="w-full h-full flex items-center justify-center p-4 md:p-10 relative">
-        <div
-          className="relative bg-white shadow-[0_10px_30px_rgba(0,0,0,0.5)] flex-shrink-0 transition-all duration-300 rounded-xl overflow-hidden"
-          style={{ aspectRatio: `${boardSize.width} / ${boardSize.height}`, maxWidth: '100%', maxHeight: '100%' }}
+      {/* ГЛАВНЫЙ БЛОК ДОСКИ - ТЕПЕРЬ С ЖЕСТКИМ КАРКАСОМ */}
+      <div className="w-full h-full flex items-center justify-center p-2 pb-24 md:p-6 md:pb-28 relative">
+        <div 
+            className="relative bg-white shadow-[0_10px_50px_rgba(0,0,0,0.8)] rounded-xl overflow-hidden flex-shrink-0 flex items-center justify-center" 
+            style={{ maxWidth: '100%', maxHeight: '100%' }}
         >
-          {slideBaseUrl ? (
-            <img src={`${slideBaseUrl}${currentPage}.png`} alt={`Slide ${currentPage}`} className="absolute inset-0 w-full h-full pointer-events-none select-none" onLoad={handleImageLoad} />
-          ) : (
-            <svg viewBox={`0 0 ${boardSize.width} ${boardSize.height}`} className="absolute inset-0 w-full h-full pointer-events-none"><rect width="100%" height="100%" fill="white"/></svg>
+          {/* Это наш невидимый SVG-скелет. Он заставляет контейнер раздуться на весь экран с сохранением пропорций */}
+          <svg viewBox={`0 0 ${boardSize.width} ${boardSize.height}`} style={{ maxWidth: '100%', maxHeight: 'calc(100vh - 180px)', width: 'auto', height: 'auto' }} className="pointer-events-none invisible" />
+          
+          {/* Слайды и канвас теперь идеально натягиваются на этот скелет */}
+          {slideBaseUrl && (
+            <img 
+              src={`${slideBaseUrl}${currentPage}.png`} 
+              alt={`Slide ${currentPage}`}
+              className="absolute inset-0 w-full h-full object-fill pointer-events-none select-none" 
+              onLoad={handleImageLoad}
+              crossOrigin="anonymous" 
+            />
           )}
 
           <canvas ref={staticCanvasRef} width={boardSize.width} height={boardSize.height} className="absolute inset-0 w-full h-full object-fill pointer-events-none" />
-
           <canvas ref={activeCanvasRef} width={boardSize.width} height={boardSize.height} onPointerDown={onPointerDown} onPointerMove={onPointerMove} onPointerUp={onPointerUp} onPointerOut={onPointerUp} className={`absolute inset-0 w-full h-full object-fill ${isHost ? 'cursor-crosshair' : 'pointer-events-none'}`} style={{ touchAction: 'none' }} />
 
           {laserPos && (
