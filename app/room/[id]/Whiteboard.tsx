@@ -335,26 +335,27 @@ export default function AlveriumWhiteboard({ isHost }: { isHost: boolean }) {
         </div>
       )}
 
-      {/* ГЛАВНЫЙ БЛОК ДОСКИ - ТЕПЕРЬ С ЖЕСТКИМ КАРКАСОМ */}
+      {/* НОВЫЙ БЛОК. Больше никаких прозрачных скелетов. Сама картинка задает размер. */}
       <div className="w-full h-full flex items-center justify-center p-2 pb-24 md:p-6 md:pb-28 relative">
         <div 
-            className="relative bg-white shadow-[0_10px_50px_rgba(0,0,0,0.8)] rounded-xl overflow-hidden flex-shrink-0 flex items-center justify-center" 
-            style={{ maxWidth: '100%', maxHeight: '100%' }}
+          className="relative bg-white shadow-[0_10px_50px_rgba(0,0,0,0.8)] rounded-xl overflow-hidden flex-shrink-0 inline-block" 
+          style={{ maxWidth: '100%', maxHeight: '100%' }}
         >
-          {/* Это наш невидимый SVG-скелет. Он заставляет контейнер раздуться на весь экран с сохранением пропорций */}
-          <svg viewBox={`0 0 ${boardSize.width} ${boardSize.height}`} style={{ maxWidth: '100%', maxHeight: 'calc(100vh - 180px)', width: 'auto', height: 'auto' }} className="pointer-events-none invisible" />
-          
-          {/* Слайды и канвас теперь идеально натягиваются на этот скелет */}
-          {slideBaseUrl && (
+          {slideBaseUrl ? (
             <img 
               src={`${slideBaseUrl}${currentPage}.png`} 
               alt={`Slide ${currentPage}`}
-              className="absolute inset-0 w-full h-full object-fill pointer-events-none select-none" 
+              className="block pointer-events-none select-none" 
+              style={{ maxHeight: 'calc(100vh - 160px)', maxWidth: '100%', width: 'auto', height: 'auto', objectFit: 'contain' }}
               onLoad={handleImageLoad}
-              crossOrigin="anonymous" 
             />
+          ) : (
+            <svg width={boardSize.width} height={boardSize.height} className="block pointer-events-none select-none" style={{ maxHeight: 'calc(100vh - 160px)', maxWidth: '100%', width: 'auto', height: 'auto' }}>
+              <rect width="100%" height="100%" fill="white"/>
+            </svg>
           )}
 
+          {/* Канвасы лежат абсолютно поверх картинки, считывая её размеры */}
           <canvas ref={staticCanvasRef} width={boardSize.width} height={boardSize.height} className="absolute inset-0 w-full h-full object-fill pointer-events-none" />
           <canvas ref={activeCanvasRef} width={boardSize.width} height={boardSize.height} onPointerDown={onPointerDown} onPointerMove={onPointerMove} onPointerUp={onPointerUp} onPointerOut={onPointerUp} className={`absolute inset-0 w-full h-full object-fill ${isHost ? 'cursor-crosshair' : 'pointer-events-none'}`} style={{ touchAction: 'none' }} />
 
