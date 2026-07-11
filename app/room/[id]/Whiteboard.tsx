@@ -151,7 +151,7 @@ export default function AlveriumWhiteboard({ isHost }: { isHost: boolean }) {
     setUploadProgress(1);
     try {
         const fd = new FormData(); fd.append('file', file);
-        const res = await fetch('https://video.alverium.ru/api/convert_pdf', { method: 'POST', body: fd });
+        const res = await fetch('/api/proxy-pdf', { method: 'POST', body: fd });
         const data = await res.json();
         if (data.status === 'success') {
            setTotalPages(data.pages); setSlideBaseUrl(data.slide_base_url); setCurrentPage(1);
