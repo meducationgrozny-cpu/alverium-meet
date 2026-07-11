@@ -283,7 +283,9 @@ export default function AlveriumWhiteboard({ isHost }: { isHost: boolean }) {
   };
 
   return (
-    <div className="w-full h-full relative overflow-hidden bg-[#0a0a0a]">
+    <div className="w-full h-full relative overflow-hidden bg-[#0a0a0a] flex flex-col">
+      
+      {/* ВЕРХНЯЯ ПАНЕЛЬ ИНСТРУМЕНТОВ */}
       {isHost && (
         <div className="absolute top-4 left-1/2 -translate-x-1/2 z-40 flex flex-col items-center gap-2 transition-all duration-300">
           <button 
@@ -321,6 +323,7 @@ export default function AlveriumWhiteboard({ isHost }: { isHost: boolean }) {
         </div>
       )}
 
+      {/* НИЖНЯЯ ПАНЕЛЬ */}
       {isHost && (
         <div className="absolute bottom-4 left-1/2 -translate-x-1/2 z-30 flex items-center gap-4 bg-[#0a0a0a]/90 backdrop-blur-xl px-4 py-2.5 rounded-2xl border border-white/10 shadow-[0_10px_30px_rgba(0,0,0,0.8)]">
           <label className="cursor-pointer bg-white/10 hover:bg-white/20 text-white text-xs font-bold px-4 py-2 rounded-xl transition-all flex items-center gap-2" title="Или сделайте скриншот и нажмите Ctrl+V">
@@ -335,27 +338,33 @@ export default function AlveriumWhiteboard({ isHost }: { isHost: boolean }) {
         </div>
       )}
 
-      {/* НОВЫЙ БЛОК. Больше никаких прозрачных скелетов. Сама картинка задает размер. */}
-      <div className="w-full h-full flex items-center justify-center p-2 pb-24 md:p-6 md:pb-28 relative">
+      {/* 
+        РАБОЧАЯ ЗОНА ДОСКИ (С БЕЗОПАСНЫМИ ОТСТУПАМИ)
+        pt-[100px] и pb-[90px] гарантируют, что слайд физически не сможет залезть под панели.
+        А aspectRatio + maxWidth/maxHeight заставляют его заполнить 100% оставшегося места!
+      */}
+      <div className="w-full h-full flex items-center justify-center px-4 pt-[100px] pb-[90px] relative z-10 pointer-events-none">
         <div 
-          className="relative bg-white shadow-[0_10px_50px_rgba(0,0,0,0.8)] rounded-xl overflow-hidden flex-shrink-0 inline-block" 
-          style={{ maxWidth: '100%', maxHeight: '100%' }}
+          className="relative bg-white shadow-2xl rounded-lg overflow-hidden flex-shrink-0 pointer-events-auto"
+          style={{ 
+            aspectRatio: `${boardSize.width} / ${boardSize.height}`,
+            maxWidth: '100%', 
+            maxHeight: '100%' 
+          }}
         >
           {slideBaseUrl ? (
             <img 
               src={`${slideBaseUrl}${currentPage}.png`} 
               alt={`Slide ${currentPage}`}
-              className="block pointer-events-none select-none" 
-              style={{ maxHeight: 'calc(100vh - 160px)', maxWidth: '100%', width: 'auto', height: 'auto', objectFit: 'contain' }}
+              className="absolute inset-0 w-full h-full object-fill pointer-events-none select-none" 
               onLoad={handleImageLoad}
             />
           ) : (
-            <svg width={boardSize.width} height={boardSize.height} className="block pointer-events-none select-none" style={{ maxHeight: 'calc(100vh - 160px)', maxWidth: '100%', width: 'auto', height: 'auto' }}>
+            <svg viewBox={`0 0 ${boardSize.width} ${boardSize.height}`} className="absolute inset-0 w-full h-full pointer-events-none select-none">
               <rect width="100%" height="100%" fill="white"/>
             </svg>
           )}
 
-          {/* Канвасы лежат абсолютно поверх картинки, считывая её размеры */}
           <canvas ref={staticCanvasRef} width={boardSize.width} height={boardSize.height} className="absolute inset-0 w-full h-full object-fill pointer-events-none" />
           <canvas ref={activeCanvasRef} width={boardSize.width} height={boardSize.height} onPointerDown={onPointerDown} onPointerMove={onPointerMove} onPointerUp={onPointerUp} onPointerOut={onPointerUp} className={`absolute inset-0 w-full h-full object-fill ${isHost ? 'cursor-crosshair' : 'pointer-events-none'}`} style={{ touchAction: 'none' }} />
 
