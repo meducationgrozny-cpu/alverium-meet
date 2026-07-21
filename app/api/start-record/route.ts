@@ -10,10 +10,20 @@ const egressClient = new EgressClient(
 export async function POST(req: Request) {
   try {
     const body = await req.json();
+    
+    // Генерируем красивое название файла: Урок-ДД-ММ-ГГГГ_ЧЧ-ММ
+    const now = new Date();
+    const dateStr = now.toLocaleDateString('ru-RU').replace(/\./g, '-');
+    const timeStr = now.toLocaleTimeString('ru-RU', { hour: '2-digit', minute: '2-digit' }).replace(/:/g, '-');
+    const niceName = `Урок-${dateStr}_${timeStr}`;
+
     const info = await egressClient.startRoomCompositeEgress(
       body.roomName, 
       {
-        file: { filepath: `/out/${body.roomName}-${Date.now()}.mp4` }
+        file: { filepath: `/out/${niceName}.mp4` }
+      } as any,
+      {
+        customBaseUrl: `https://meet.alverium.ru/room/${body.roomName}`
       } as any
     );
     return NextResponse.json({ success: true, egressId: info.egressId });
