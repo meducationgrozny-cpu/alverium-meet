@@ -25,7 +25,7 @@ function parseJwtAdmin(token: string | null) {
 // ИКОНКИ
 // ==========================================
 const SettingsIcon = () => (<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" className="w-5 h-5"><path strokeLinecap="round" strokeLinejoin="round" d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z" /><path strokeLinecap="round" strokeLinejoin="round" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" /></svg>);
-const RecordIcon = () => (<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" className="w-5 h-5 group-hover:stroke-red-500"><circle cx="12" cy="12" r="10" /><circle cx="12" cy="12" r="4" fill="currentColor" className="text-red-600 group-hover:text-red-500" /></svg>);
+const RecordIcon = () => (<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" className="w-5 h-5 group-hover:stroke-red-500"><circle cx="12" cy="12" r="10" /><circle cx="12" cy="12" r="4" fill="currentColor" className="text-current" /></svg>);
 const PenIcon = () => (<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" className="w-5 h-5"><path strokeLinecap="round" strokeLinejoin="round" d="M16.862 4.487l1.687-1.688a1.875 1.875 0 112.652 2.652L6.832 19.82a4.5 4.5 0 01-1.89 1.12l-2.827.942a.375.375 0 01-.475-.475l.942-2.827a4.5 4.5 0 011.12-1.89l13.13-13.132z" /></svg>);
 const SidebarIcon = () => (<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" className="w-5 h-5"><path strokeLinecap="round" strokeLinejoin="round" d="M10.5 6h9.75M10.5 6a1.5 1.5 0 11-3 0m3 0a1.5 1.5 0 10-3 0M3.75 6H7.5m3 12h9.75m-9.75 0a1.5 1.5 0 01-3 0m3 0a1.5 1.5 0 00-3 0m-3.75 0H7.5m9-6h3.75m-3.75 0a1.5 1.5 0 01-3 0m3 0a1.5 1.5 0 00-3 0m-9.75 0h9.75" /></svg>);
 const SendIcon = () => (<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className="w-4 h-4"><path strokeLinecap="round" strokeLinejoin="round" d="M6 12L3.269 3.126A59.768 59.768 0 0121.485 12 59.77 59.77 0 013.27 20.876L5.999 12zm0 0h7.5" /></svg>);
@@ -105,7 +105,6 @@ function DraggableCameras({ tracks }: { tracks: any[] }) {
     if (!dragRef.current) return;
     dragRef.current.setPointerCapture(e.pointerId);
     setIsDragging(true);
-    // Берем смещение клика относительно самой камеры
     const rect = dragRef.current.getBoundingClientRect();
     offsetRef.current = { x: e.clientX - rect.left, y: e.clientY - rect.top };
   };
@@ -114,19 +113,12 @@ function DraggableCameras({ tracks }: { tracks: any[] }) {
     if (!isDragging || !dragRef.current || !dragRef.current.parentElement) return;
     const parent = dragRef.current.parentElement;
     const parentRect = parent.getBoundingClientRect();
-
-    // Считаем максимально возможные координаты ВНУТРИ родителя
     const maxX = parent.clientWidth - dragRef.current.offsetWidth;
     const maxY = parent.clientHeight - dragRef.current.offsetHeight;
-
-    // Считаем позицию мыши относительно родителя
     let newX = e.clientX - parentRect.left - offsetRef.current.x;
     let newY = e.clientY - parentRect.top - offsetRef.current.y;
-
-    // Жестко блокируем выход за пределы родителя (доски)
     newX = Math.max(0, Math.min(newX, maxX));
     newY = Math.max(0, Math.min(newY, maxY));
-
     setPos({ x: newX, y: newY });
   };
 
@@ -145,7 +137,6 @@ function DraggableCameras({ tracks }: { tracks: any[] }) {
     >
       {tracks.map(track => (
         <div key={track.publication?.trackSid || track.participant.identity} className={`w-full aspect-video bg-black rounded-xl border ${isDragging ? 'border-red-500' : 'border-white/20'} shadow-[0_10px_30px_rgba(0,0,0,0.8)] overflow-hidden transition-colors`}>
-          {/* Используем чистый VideoTrack вместо ParticipantTile, чтобы убрать плашку с именем */}
           <VideoTrack trackRef={track} className="w-full h-full object-cover pointer-events-none" />
         </div>
       ))}
@@ -170,10 +161,7 @@ function AlveriumSidebar({ isOpen, onClose, isHost }: { isOpen: boolean, onClose
   return (
     <>
       {isOpen && <div className="md:hidden fixed inset-0 bg-black/60 z-30" onClick={onClose} />}
-      {/* Добавлен overflow-hidden, а контент внутри имеет фиксированную ширину w-80 */}
       <div className={`fixed md:relative inset-y-0 right-0 z-40 flex flex-col h-full bg-[#050505] border-l border-white/5 shrink-0 transform transition-all duration-300 ease-in-out overflow-hidden ${isOpen ? 'translate-x-0 w-[85%] md:w-80 md:opacity-100' : 'translate-x-full md:translate-x-0 w-0 opacity-0 border-none'}`}>
-        
-        {/* Жестко фиксируем ширину внутренних блоков, чтобы они не ломались при сужении родителя */}
         <div className="p-3 border-b border-white/5 flex flex-col gap-3 w-full md:w-80 shrink-0">
           <div className="flex justify-between items-center px-2">
             <h2 className="text-[10px] font-bold text-gray-500 uppercase">Панель управления</h2>
@@ -240,6 +228,10 @@ function AlveriumStage() {
   const [toastVisible, setToastVisible] = useState(false);
   const [hostIdentity, setHostIdentity] = useState<string | null>(null);
 
+  // СОСТОЯНИЯ ЗАПИСИ
+  const [isRecording, setIsRecording] = useState(false);
+  const [egressId, setEgressId] = useState<string | null>(null);
+
   const searchParams = useSearchParams();
   const token = searchParams.get('token');
   const room = useRoomContext();
@@ -289,6 +281,50 @@ function AlveriumStage() {
     }
   };
 
+  // ==========================================
+  // ЛОГИКА ЗАПУСКА И ОСТАНОВКИ ЗАПИСИ
+  // ==========================================
+  const handleRecordClick = async () => {
+    if (!isRecording) {
+      try {
+        showToast("Запуск записи на сервере...");
+        const res = await fetch('https://meet.alverium.ru/api/start-record', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ roomName: room.name })
+        });
+        
+        const data = await res.json();
+        if (data.success) {
+          setEgressId(data.egressId);
+          setIsRecording(true);
+          showToast("🔴 Запись урока началась!");
+        } else {
+          showToast("Ошибка запуска: " + data.error);
+        }
+      } catch (err) {
+        console.error('Ошибка при запуске записи:', err);
+        showToast("Ошибка соединения с сервером записи");
+      }
+    } else {
+      try {
+        showToast("Остановка записи...");
+        await fetch('https://meet.alverium.ru/api/stop-record', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ egressId: egressId })
+        });
+        
+        setIsRecording(false);
+        setEgressId(null);
+        showToast("✅ Запись сохранена в VOD-консоль");
+      } catch (err) {
+        console.error('Ошибка при остановке записи:', err);
+        showToast("Ошибка при остановке записи");
+      }
+    }
+  };
+
   const speakerCameraTracks = cameraTracks.filter(track => hostIdentity ? track.participant.identity === hostIdentity : true);
 
   return (
@@ -326,7 +362,17 @@ function AlveriumStage() {
       <footer className="bg-[#050505] px-4 py-3 flex justify-between z-20 border-t border-white/5 shrink-0">
         <div className="flex gap-2 w-auto md:w-1/3">
           <button onClick={() => setIsSettingsOpen(true)} className="hidden md:flex w-12 h-12 bg-white/5 rounded-xl items-center justify-center text-gray-400 hover:text-white transition-colors"><SettingsIcon /></button>
-          {isHost && <button onClick={() => showToast("Запись урока переносится на сервер (LiveKit Egress) для экономии памяти планшетов.")} className="hidden md:flex w-12 h-12 rounded-xl items-center justify-center bg-white/5 text-gray-400 hover:text-red-400 transition-colors"><RecordIcon /></button>}
+          
+          {/* ОБНОВЛЕННАЯ КНОПКА ЗАПИСИ */}
+          {isHost && (
+            <button 
+              onClick={handleRecordClick} 
+              className={`hidden md:flex w-12 h-12 rounded-xl items-center justify-center transition-all duration-300 ${isRecording ? 'bg-red-900/40 text-red-500 animate-pulse border border-red-500/30' : 'bg-white/5 text-gray-400 hover:text-red-400'}`}
+            >
+              <RecordIcon />
+            </button>
+          )}
+
           {isHost && <button onClick={toggleWhiteboard} className={`flex w-10 h-10 md:w-12 md:h-12 rounded-xl items-center justify-center transition-colors ${isWhiteboardOpen ? 'bg-red-800 text-white' : 'bg-white/5 text-gray-400 hover:text-white'}`}><PenIcon /></button>}
         </div>
         
