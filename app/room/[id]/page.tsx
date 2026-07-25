@@ -10,6 +10,7 @@ import {
   useRoomContext, useParticipants, useConnectionState, VideoTrack
 } from '@livekit/components-react';
 import { Track, RoomEvent, ConnectionState } from 'livekit-client';
+import EgressHelper from '@livekit/egress-sdk';
 
 const AlveriumWhiteboard = dynamic(() => import('./Whiteboard'), { ssr: false });
 
@@ -19,6 +20,17 @@ function parseJwtAdmin(token: string | null) {
     const payload = JSON.parse(decodeURIComponent(atob(token.split('.')[1].replace(/-/g, '+').replace(/_/g, '/')).split('').map(c => '%' + ('00' + c.charCodeAt(0).toString(16)).slice(-2)).join('')));
     return payload?.video?.roomAdmin === true;
   } catch (e) { return false; }
+}
+
+function isEgressRecorder(token: string | null) {
+  if (!token) return true; // На всякий случай пускаем
+  try {
+    const payload = JSON.parse(decodeURIComponent(atob(token.split('.')[1].replace(/-/g, '+').replace(/_/g, '/')).split('').map(c => '%' + ('00' + c.charCodeAt(0).toString(16)).slice(-2)).join('')));
+    // Ищем признаки бота-рекордера (hidden, recorder или имя EG_...)
+    return payload?.video?.hidden === true || 
+           payload?.video?.recorder === true || 
+           (payload?.name && payload.name.startsWith('EG_'));
+  } catch (e) { return true; }
 }
 
 // ==========================================
@@ -34,9 +46,6 @@ const MuteIcon = () => (<svg viewBox="0 0 24 24" fill="none" stroke="currentColo
 const KickIcon = () => (<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" className="w-4 h-4"><path strokeLinecap="round" strokeLinejoin="round" d="M15.75 9V5.25A2.25 2.25 0 0013.5 3h-6a2.25 2.25 0 00-2.25 2.25v13.5A2.25 2.25 0 007.5 21h6a2.25 2.25 0 002.25-2.25V15M12 9l-3 3m0 0l3 3m-3-3h12.75" /></svg>);
 const ScreenShareIcon = () => (<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" className="w-5 h-5"><rect x="2" y="3" width="20" height="14" rx="2" ry="2"/><line x1="8" y1="21" x2="16" y2="21"/><line x1="12" y1="17" x2="12" y2="21"/></svg>);
 
-// ==========================================
-// TOAST КОМПОНЕНТ
-// ==========================================
 const Toast = ({ message, visible }: { message: string, visible: boolean }) => (
   <div className={`fixed top-16 left-1/2 -translate-x-1/2 z-50 transition-all duration-300 ${visible ? 'opacity-100 translate-y-0' : 'opacity-0 -translate-y-5 pointer-events-none'}`}>
     <div className="bg-black/90 backdrop-blur-md border border-white/10 text-white px-6 py-3 rounded-xl shadow-[0_10px_30px_rgba(0,0,0,0.8)] font-medium text-sm flex items-center gap-3">
@@ -46,9 +55,6 @@ const Toast = ({ message, visible }: { message: string, visible: boolean }) => (
   </div>
 );
 
-// ==========================================
-// МОДАЛКА НАСТРОЕК
-// ==========================================
 const SettingsModal = ({ isOpen, onClose }: { isOpen: boolean, onClose: () => void }) => {
   const [activeTab, setActiveTab] = useState<'devices' | 'visual' | 'diagnostics'>('diagnostics');
   const connectionState = useConnectionState();
@@ -90,9 +96,6 @@ const SettingsModal = ({ isOpen, onClose }: { isOpen: boolean, onClose: () => vo
   );
 };
 
-// ==========================================
-// УМНАЯ КАМЕРА (СТРОГИЕ ГРАНИЦЫ И БЕЗ ИМЕН)
-// ==========================================
 function DraggableCameras({ tracks }: { tracks: any[] }) {
   const [pos, setPos] = useState({ x: 20, y: 20 });
   const dragRef = useRef<HTMLDivElement>(null);
@@ -144,9 +147,6 @@ function DraggableCameras({ tracks }: { tracks: any[] }) {
   );
 }
 
-// ==========================================
-// ЧАТ И САЙДБАР (ПОЛНОЕ СХЛОПЫВАНИЕ)
-// ==========================================
 function AlveriumSidebar({ isOpen, onClose, isHost }: { isOpen: boolean, onClose: () => void, isHost: boolean }) {
   const [activeTab, setActiveTab] = useState<'chat' | 'participants'>('chat');
   const { send, chatMessages } = useChat();
@@ -215,9 +215,6 @@ function AlveriumSidebar({ isOpen, onClose, isHost }: { isOpen: boolean, onClose
   );
 }
 
-// ==========================================
-// ГЛАВНАЯ СЦЕНА
-// ==========================================
 function AlveriumStage() {
   const [isSidebarOpen, setIsSidebarOpen] = useState(false);
   const [isWhiteboardOpen, setIsWhiteboardOpen] = useState(false);
@@ -228,7 +225,6 @@ function AlveriumStage() {
   const [toastVisible, setToastVisible] = useState(false);
   const [hostIdentity, setHostIdentity] = useState<string | null>(null);
 
-  // СОСТОЯНИЯ ЗАПИСИ
   const [isRecording, setIsRecording] = useState(false);
   const [egressId, setEgressId] = useState<string | null>(null);
 
@@ -237,7 +233,21 @@ function AlveriumStage() {
   const room = useRoomContext();
   const cameraTracks = useTracks([Track.Source.Camera], { onlySubscribed: false });
 
-  useEffect(() => { setIsHost(parseJwtAdmin(token)); }, [token]);
+  // === ЖЕЛЕЗОБЕТОННЫЙ СТАРТ EGRESS ===
+  useEffect(() => { 
+    setIsHost(parseJwtAdmin(token)); 
+    
+    // Всегда шлем сигнал старта. Нативные браузеры просто проигнорируют это, а бот поймает!
+    setTimeout(() => {
+      try { EgressHelper.startRecording(); } catch (e) {}
+      console.log("START_RECORDING"); // Прямой нативный вывод для Chrome бота
+    }, 4000); // Ждем 4 секунды, чтобы доска точно прогрузилась
+    
+    // Открываем доску, если это бот
+    if (isEgressRecorder(token)) {
+      setIsWhiteboardOpen(true);
+    }
+  }, [token]);
 
   const showToast = (msg: string) => {
     setToastMsg(msg);
@@ -261,7 +271,9 @@ function AlveriumStage() {
       try {
         const msg = JSON.parse(new TextDecoder().decode(payload));
         if (msg.type === 'WHITEBOARD_TOGGLE') {
-          setIsWhiteboardOpen(msg.isOpen);
+          if (!isEgressRecorder(token)) {
+             setIsWhiteboardOpen(msg.isOpen);
+          }
           if (msg.hostId) setHostIdentity(msg.hostId);
           else if (participant) setHostIdentity(participant.identity);
         }
@@ -271,7 +283,7 @@ function AlveriumStage() {
     };
     room.on(RoomEvent.DataReceived, handleData);
     return () => { room.off(RoomEvent.DataReceived, handleData); };
-  }, [room]);
+  }, [room, token]);
 
   const toggleWhiteboard = () => {
     const newState = !isWhiteboardOpen; setIsWhiteboardOpen(newState);
@@ -281,14 +293,11 @@ function AlveriumStage() {
     }
   };
 
-  // ==========================================
-  // ЛОГИКА ЗАПУСКА И ОСТАНОВКИ ЗАПИСИ
-  // ==========================================
   const handleRecordClick = async () => {
     if (!isRecording) {
       try {
         showToast("Запуск записи на сервере...");
-        const res = await fetch('https://meet.alverium.ru/api/start-record', {
+        const res = await fetch('/api/start-record', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ roomName: room.name })
@@ -309,7 +318,7 @@ function AlveriumStage() {
     } else {
       try {
         showToast("Остановка записи...");
-        await fetch('https://meet.alverium.ru/api/stop-record', {
+        await fetch('/api/stop-record', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ egressId: egressId })
@@ -325,7 +334,7 @@ function AlveriumStage() {
     }
   };
 
-  const speakerCameraTracks = cameraTracks.filter(track => hostIdentity ? track.participant.identity === hostIdentity : true);
+  const speakerCameraTracks = cameraTracks.filter(track => (hostIdentity ? track.participant.identity === hostIdentity : true) && track.publication?.isMuted === false);
 
   return (
     <div className="flex flex-col h-[100dvh] bg-[#000000] text-white relative">
@@ -363,7 +372,6 @@ function AlveriumStage() {
         <div className="flex gap-2 w-auto md:w-1/3">
           <button onClick={() => setIsSettingsOpen(true)} className="hidden md:flex w-12 h-12 bg-white/5 rounded-xl items-center justify-center text-gray-400 hover:text-white transition-colors"><SettingsIcon /></button>
           
-          {/* ОБНОВЛЕННАЯ КНОПКА ЗАПИСИ */}
           {isHost && (
             <button 
               onClick={handleRecordClick} 

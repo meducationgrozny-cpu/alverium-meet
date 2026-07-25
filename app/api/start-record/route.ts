@@ -11,7 +11,6 @@ export async function POST(req: Request) {
   try {
     const body = await req.json();
     
-    // Генерируем красивое название файла: Урок-ДД-ММ-ГГГГ_ЧЧ-ММ
     const now = new Date();
     const dateStr = now.toLocaleDateString('ru-RU').replace(/\./g, '-');
     const timeStr = now.toLocaleTimeString('ru-RU', { hour: '2-digit', minute: '2-digit' }).replace(/:/g, '-');
