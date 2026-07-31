@@ -39,3 +39,8 @@ yarn-error.log*
 # typescript
 *.tsbuildinfo
 next-env.d.ts
+
+# Временные файлы доски
+temp_pdf/
+patch-*.js
+*.backup

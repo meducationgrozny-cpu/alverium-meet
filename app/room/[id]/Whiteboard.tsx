@@ -295,29 +295,26 @@ export default function AlveriumWhiteboard({ isHost }: { isHost: boolean }) {
 
   
   const [isToolbarOpen, setIsToolbarOpen] = React.useState(true);
-  const [isFakeFullscreen, setIsFakeFullscreen] = React.useState(false);
-
-  const toggleFullScreen = () => {
-    if (containerRef.current && containerRef.current.requestFullscreen) {
-      if (!document.fullscreenElement) {
-        containerRef.current.requestFullscreen().catch(() => {
-          setIsFakeFullscreen(prev => !prev);
-        });
-      } else {
-        if (document.exitFullscreen) document.exitFullscreen().catch(() => {});
-      }
-    } else {
-      setIsFakeFullscreen(prev => !prev);
-    }
-  };
+  const [isTheaterMode, setIsTheaterMode] = React.useState(false);
 
   return (
-    <div ref={containerRef} className={`bg-[#1a1a1a] flex flex-col transition-all duration-300 ${isFakeFullscreen ? 'fixed inset-0 z-[9999] w-screen h-screen' : 'relative w-full h-full md:rounded-xl overflow-hidden shadow-2xl'}`}>
-      
-      <button onClick={toggleFullScreen} className="absolute top-4 right-4 z-50 bg-black/60 hover:bg-black/90 text-white px-3 py-2 rounded-lg backdrop-blur-md transition-all border border-white/10 text-xs md:text-sm shadow-lg">
-        {isFakeFullscreen || (typeof document !== 'undefined' && document.fullscreenElement) ? '⛶ Свернуть' : '⛶ На весь экран'}
-      </button>
+    <div className={`flex flex-col transition-all duration-400 ease-out ${isTheaterMode ? 'fixed inset-0 z-[99999] w-screen h-screen bg-black' : 'relative w-full h-full bg-[#1a1a1a] md:rounded-xl overflow-hidden shadow-2xl'}`}>
 
+      {/* Премиальная кнопка закрытия */}
+      {isTheaterMode && (
+        <button onClick={() => setIsTheaterMode(false)} className="absolute top-6 right-6 z-[100000] bg-white/10 hover:bg-white/20 border border-white/20 text-white rounded-full w-10 h-10 flex items-center justify-center backdrop-blur-md shadow-lg transition-all">
+          ✕
+        </button>
+      )}
+
+      {/* Ненавязчивая подсказка для учеников */}
+      {!isTheaterMode && !isHost && (
+        <div className="absolute top-4 right-4 z-50 bg-black/40 px-3 py-1.5 rounded-lg text-white/60 text-[10px] md:text-xs backdrop-blur-md pointer-events-none border border-white/5 shadow-lg">
+          Двойной тап — на весь экран
+        </div>
+      )}
+
+      {/* Умная сворачиваемая панель управления */}
       {isHost && (
         <div className="absolute top-4 left-1/2 -translate-x-1/2 z-40 flex flex-col items-center">
           <button onClick={() => setIsToolbarOpen(!isToolbarOpen)} className="bg-black/60 text-white/80 hover:text-white text-[10px] md:text-xs px-4 py-1.5 rounded-full backdrop-blur-md transition-all border border-white/10 shadow-lg">
@@ -344,8 +341,9 @@ export default function AlveriumWhiteboard({ isHost }: { isHost: boolean }) {
         </div>
       )}
 
-      <div onDoubleClick={typeof handleDoubleClick !== 'undefined' ? handleDoubleClick : undefined} className="flex-1 w-full h-full p-0 flex items-center justify-center relative touch-none bg-black">
-        <div className="relative shadow-2xl bg-white w-full h-full max-w-full max-h-full mx-auto flex-shrink-0 md:rounded-lg overflow-hidden flex items-center justify-center">
+      {/* Резиновый холст с отработкой двойного тапа */}
+      <div onDoubleClick={() => setIsTheaterMode(prev => !prev)} className="flex-1 w-full h-full p-0 flex items-center justify-center relative touch-none bg-black cursor-pointer">
+        <div className="relative shadow-2xl bg-white w-full h-full max-w-full max-h-full mx-auto flex-shrink-0 md:rounded-lg overflow-hidden flex items-center justify-center pointer-events-none md:pointer-events-auto">
           <canvas ref={bgCanvasRef} width={VIRTUAL_W} height={VIRTUAL_H} className="absolute inset-0 w-full h-full object-contain pointer-events-none" />
           <canvas
             ref={drawCanvasRef}
@@ -355,7 +353,7 @@ export default function AlveriumWhiteboard({ isHost }: { isHost: boolean }) {
             onPointerMove={onPointerMove}
             onPointerUp={onPointerUp}
             onPointerOut={onPointerUp}
-            className={`absolute inset-0 w-full h-full object-contain ${isHost ? 'cursor-crosshair' : 'pointer-events-none'}`}
+            className={`absolute inset-0 w-full h-full object-contain ${isHost ? 'cursor-crosshair pointer-events-auto' : 'pointer-events-none'}`}
             style={{ touchAction: 'none' }}
           />
         </div>
