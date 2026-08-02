@@ -44,3 +44,10 @@ next-env.d.ts
 temp_pdf/
 patch-*.js
 *.backup
+
+# Temporary files and custom patches
+temp_pdf/
+temp_pdf
+patch-ios.js
+patch-ui.js
+*.log

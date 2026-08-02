@@ -11,7 +11,19 @@ if (typeof window !== 'undefined') {
 }
 
 interface Point { x: number; y: number; }
-interface Line { points: Point[]; color: string; width: number; }
+interface Line { points: Point[]; color: string; width: number; mode: 'draw' | 'erase'; }
+
+// --- ПРЕМИАЛЬНЫЕ SVG ИКОНКИ ---
+const ExpandIcon = () => (<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="w-5 h-5"><path d="M15 3h6v6M9 21H3v-6M21 3l-7 7M3 21l7-7"/></svg>);
+const CompressIcon = () => (<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="w-5 h-5"><path d="M4 14h6v6M20 10h-6V4M14 10l7-7M10 14l-7 7"/></svg>);
+const UploadPdfIcon = () => (<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="w-5 h-5"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path><polyline points="14 2 14 8 20 8"></polyline><line x1="12" y1="18" x2="12" y2="12"></line><line x1="9" y1="15" x2="15" y2="15"></line></svg>);
+const PrevIcon = () => (<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="w-5 h-5"><polyline points="15 18 9 12 15 6"></polyline></svg>);
+const NextIcon = () => (<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="w-5 h-5"><polyline points="9 18 15 12 9 6"></polyline></svg>);
+const PanIcon = () => (<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="w-5 h-5"><path d="M3 3l7.07 16.97 2.51-7.39 7.39-2.51L3 3z"></path><path d="M13 13l6 6"></path></svg>);
+const PenIcon = () => (<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="w-5 h-5"><path d="M12 19l7-7 3 3-7 7-3-3z"></path><path d="M18 13l-1.5-7.5L2 2l3.5 14.5L13 18l5-5z"></path><path d="M2 2l7.586 7.586"></path><circle cx="11" cy="11" r="2"></circle></svg>);
+const EraserIcon = () => (<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="w-5 h-5"><path d="M20 20H7L3 16C2.5 15.5 2.5 14.5 3 14L13 4C13.5 3.5 14.5 3.5 15 4L20 9C20.5 9.5 20.5 10.5 20 11L11 20"></path><path d="M16 16l-4-4"></path></svg>);
+const TrashIcon = () => (<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="w-5 h-5"><polyline points="3 6 5 6 21 6"></polyline><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path></svg>);
+const SaveIcon = () => (<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="w-5 h-5"><path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z"></path><polyline points="17 21 17 13 7 13 7 21"></polyline><polyline points="7 3 7 8 15 8"></polyline></svg>);
 
 export default function AlveriumWhiteboard({ isHost }: { isHost: boolean }) {
   const room = useRoomContext();
@@ -22,12 +34,18 @@ export default function AlveriumWhiteboard({ isHost }: { isHost: boolean }) {
   const VIRTUAL_W = 1920;
   const VIRTUAL_H = 1080;
   const ROOM_KEY = `alverium_wb_${room.name}`;
+  const ROOM_KEY_PDF = `alverium_wb_pdf_${room.name}`;
+  const ROOM_KEY_PAGE = `alverium_wb_page_${room.name}`;
 
   const [currentPage, setCurrentPage] = useState(1);
   const [totalPages, setTotalPages] = useState(1);
   const [isDrawing, setIsDrawing] = useState(false);
   const [uploadProgress, setUploadProgress] = useState(0);
   const [renderTrigger, setRenderTrigger] = useState(0);
+  
+  const [activeTool, setActiveTool] = useState<'pan' | 'pen' | 'eraser'>('pen');
+  const [isTheaterMode, setIsTheaterMode] = useState(false);
+  const [isMounted, setIsMounted] = useState(false);
 
   const linesMap = useRef<Record<number, Line[]>>({});
   const currentLine = useRef<Line | null>(null);
@@ -36,27 +54,67 @@ export default function AlveriumWhiteboard({ isHost }: { isHost: boolean }) {
   const pdfBytesRef = useRef<ArrayBuffer | null>(null);
   const currentPdfUrlRef = useRef<string | null>(null);
 
+  // Инициализация и восстановление состояния (Линии + PDF)
   useEffect(() => {
-    const saved = localStorage.getItem(ROOM_KEY);
-    if (saved) {
-      try { linesMap.current = JSON.parse(saved); } catch(e) {}
+    setIsMounted(true);
+    
+    // Восстанавливаем линии
+    const savedLines = localStorage.getItem(ROOM_KEY);
+    if (savedLines) {
+      try { linesMap.current = JSON.parse(savedLines); } catch(e) {}
     }
-  }, [ROOM_KEY]);
+
+    // Восстанавливаем PDF, если доску случайно закрыли/открыли
+    const savedPdfUrl = localStorage.getItem(ROOM_KEY_PDF);
+    const savedPage = localStorage.getItem(ROOM_KEY_PAGE);
+    
+    if (savedPage) setCurrentPage(Number(savedPage));
+
+    if (savedPdfUrl) {
+      currentPdfUrlRef.current = savedPdfUrl;
+      fetch(savedPdfUrl)
+        .then(res => res.arrayBuffer())
+        .then(arrayBuffer => {
+          pdfBytesRef.current = arrayBuffer.slice(0);
+          return pdfjsLib.getDocument({ data: arrayBuffer }).promise;
+        })
+        .then(pdf => {
+          pdfDocRef.current = pdf;
+          setTotalPages(pdf.numPages);
+          setRenderTrigger(prev => prev + 1);
+        })
+        .catch(console.error);
+    }
+  }, [ROOM_KEY, ROOM_KEY_PDF, ROOM_KEY_PAGE]);
 
   const saveToLocal = () => {
     localStorage.setItem(ROOM_KEY, JSON.stringify(linesMap.current));
   };
 
-  const handleDoubleClick = async () => {
-    if (!containerRef.current) return;
-    if (!document.fullscreenElement) {
-      try { await containerRef.current.requestFullscreen(); } catch (err) { console.error("Ошибка Fullscreen:", err); }
-    } else {
-      if (document.exitFullscreen) await document.exitFullscreen();
-    }
+  // Слушатель клавиатуры: Перелистывание слайдов + выход по ESC
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') {
+        setIsTheaterMode(false);
+      }
+      if (!isHost) return;
+      if (e.key === 'ArrowRight' && currentPage < totalPages) {
+        changePage(currentPage + 1);
+      } else if (e.key === 'ArrowLeft' && currentPage > 1) {
+        changePage(currentPage - 1);
+      }
+    };
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [isHost, currentPage, totalPages]);
+
+  const changePage = (newPage: number) => {
+    setCurrentPage(newPage);
+    localStorage.setItem(ROOM_KEY_PAGE, newPage.toString());
+    broadcast({ type: 'WB_PAGE', page: newPage });
   };
 
-  // Синхронизация опоздавших учеников
+  // Синхронизация опоздавших
   useEffect(() => {
     const handleParticipantConnected = () => {
       if (isHost) {
@@ -88,7 +146,6 @@ export default function AlveriumWhiteboard({ isHost }: { isHost: boolean }) {
           saveToLocal();
           if (msg.page === currentPage) drawAllLines(msg.page);
         } else if (msg.type === 'WB_PDF_URL' && !isHost) {
-          // Ученик получает URL и скачивает PDF
           try {
             const res = await fetch(msg.url);
             const arrayBuffer = await res.arrayBuffer();
@@ -98,9 +155,7 @@ export default function AlveriumWhiteboard({ isHost }: { isHost: boolean }) {
             pdfDocRef.current = pdf;
             setTotalPages(pdf.numPages);
             setRenderTrigger(prev => prev + 1);
-          } catch (e) {
-            console.error("Ошибка загрузки синхронизированного PDF", e);
-          }
+          } catch (e) {}
         }
       } catch (e) {}
     };
@@ -129,9 +184,7 @@ export default function AlveriumWhiteboard({ isHost }: { isHost: boolean }) {
       const offsetY = (VIRTUAL_H - viewport.height) / 2;
       const renderContext: any = { canvasContext: ctx, viewport: viewport, transform: [1, 0, 0, 1, offsetX, offsetY] };
       await page.render(renderContext).promise;
-    } catch (err) {
-      console.error("Ошибка рендера:", err);
-    }
+    } catch (err) {}
   };
 
   const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -139,29 +192,30 @@ export default function AlveriumWhiteboard({ isHost }: { isHost: boolean }) {
     if (!file || !isHost) return;
 
     try {
-        const arrayBuffer = await file.arrayBuffer();
-        pdfBytesRef.current = arrayBuffer.slice(0);
-        const loadingTask = pdfjsLib.getDocument({ data: arrayBuffer });
-        const pdf = await loadingTask.promise;
-        pdfDocRef.current = pdf;
-        setTotalPages(pdf.numPages);
-        setCurrentPage(1);
-        setRenderTrigger(prev => prev + 1);
-        broadcast({ type: 'WB_PAGE', page: 1 });
+      const arrayBuffer = await file.arrayBuffer();
+      pdfBytesRef.current = arrayBuffer.slice(0);
+      const loadingTask = pdfjsLib.getDocument({ data: arrayBuffer });
+      const pdf = await loadingTask.promise;
+      pdfDocRef.current = pdf;
+      setTotalPages(pdf.numPages);
+      setCurrentPage(1);
+      setRenderTrigger(prev => prev + 1);
+      broadcast({ type: 'WB_PAGE', page: 1 });
 
-        // Фоновая выгрузка (НАПРЯМУЮ В NEXT.JS БЕЗ PYTHON-СЕРВЕРА)
-    const fd = new FormData();
-    fd.append('file', file);
-    fetch('/api/pdf-sync', { method: 'POST', body: fd })
-      .then(res => res.json())
-      .then(data => {
-        if (data.url) {
-          currentPdfUrlRef.current = data.url;
-          broadcast({ type: 'WB_PDF_URL', url: data.url });
-        }
-      }).catch(console.error);
+      const fd = new FormData();
+      fd.append('file', file);
+      fetch('/api/pdf-sync', { method: 'POST', body: fd })
+        .then(res => res.json())
+        .then(data => {
+          if (data.url) {
+            currentPdfUrlRef.current = data.url;
+            localStorage.setItem(ROOM_KEY_PDF, data.url);
+            localStorage.setItem(ROOM_KEY_PAGE, '1');
+            broadcast({ type: 'WB_PDF_URL', url: data.url });
+          }
+        }).catch(console.error);
 
-} catch (err) {
+    } catch (err) {
         alert("Ошибка чтения PDF: " + err);
     }
   };
@@ -175,10 +229,15 @@ export default function AlveriumWhiteboard({ isHost }: { isHost: boolean }) {
   };
 
   const onPointerDown = (e: React.PointerEvent) => {
-    if (!isHost) return;
+    if (!isHost || activeTool === 'pan') return;
     setIsDrawing(true);
     const coords = getCoords(e);
-    currentLine.current = { points: [coords], color: '#ef4444', width: 4 };
+    currentLine.current = { 
+      points: [coords], 
+      color: activeTool === 'eraser' ? '#ffffff' : '#ef4444', 
+      width: activeTool === 'eraser' ? 24 : 4,
+      mode: activeTool === 'eraser' ? 'erase' : 'draw'
+    };
   };
 
   const onPointerMove = (e: React.PointerEvent) => {
@@ -203,9 +262,12 @@ export default function AlveriumWhiteboard({ isHost }: { isHost: boolean }) {
     ctx.clearRect(0, 0, VIRTUAL_W, VIRTUAL_H);
     ctx.lineCap = 'round';
     ctx.lineJoin = 'round';
+    
     const lines = linesMap.current[page] || [];
     const allLines = activeLine ? [...lines, activeLine] : lines;
+    
     allLines.forEach(line => {
+      ctx.globalCompositeOperation = line.mode === 'erase' ? 'destination-out' : 'source-over';
       ctx.beginPath();
       ctx.strokeStyle = line.color;
       ctx.lineWidth = line.width;
@@ -215,6 +277,7 @@ export default function AlveriumWhiteboard({ isHost }: { isHost: boolean }) {
       });
       ctx.stroke();
     });
+    ctx.globalCompositeOperation = 'source-over';
   };
 
   const broadcast = (msg: any) => {
@@ -240,7 +303,9 @@ export default function AlveriumWhiteboard({ isHost }: { isHost: boolean }) {
           tempCanvas.width = VIRTUAL_W; tempCanvas.height = VIRTUAL_H;
           const ctx = tempCanvas.getContext('2d')!;
           ctx.lineCap = 'round'; ctx.lineJoin = 'round';
+          
           linesMap.current[pageNum].forEach(line => {
+            ctx.globalCompositeOperation = line.mode === 'erase' ? 'destination-out' : 'source-over';
             ctx.beginPath();
             ctx.strokeStyle = line.color;
             ctx.lineWidth = line.width;
@@ -249,6 +314,7 @@ export default function AlveriumWhiteboard({ isHost }: { isHost: boolean }) {
             });
             ctx.stroke();
           });
+          
           const pngImageBytes = await fetch(tempCanvas.toDataURL()).then(res => res.arrayBuffer());
           const pngImage = await pdfDoc.embedPng(pngImageBytes);
           const pdfPage = pdfDoc.getPage(i);
@@ -260,7 +326,6 @@ export default function AlveriumWhiteboard({ isHost }: { isHost: boolean }) {
       const blob = new Blob([pdfBytes as any], { type: 'application/pdf' });
       uploadChunked(blob);
     } catch (err) {
-      console.error(err);
       alert("Ошибка при сохранении PDF");
       setUploadProgress(0);
     }
@@ -279,7 +344,6 @@ export default function AlveriumWhiteboard({ isHost }: { isHost: boolean }) {
       fd.append('chunkIndex', String(i));
       fd.append('totalChunks', String(totalChunks));
       fd.append('folder', 'notes');
-
       try {
         await fetch('/api/proxy-upload', { method: 'POST', body: fd });
         setUploadProgress(Math.round(((i + 1) / totalChunks) * 100));
@@ -289,61 +353,81 @@ export default function AlveriumWhiteboard({ isHost }: { isHost: boolean }) {
       }
     }
     alert(`Конспект успешно сохранен в VOD консоли как ${filename}!`);
+    
+    // Очищаем кэш после успешной выгрузки
     localStorage.removeItem(ROOM_KEY);
+    localStorage.removeItem(ROOM_KEY_PDF);
+    localStorage.removeItem(ROOM_KEY_PAGE);
     setUploadProgress(0);
   };
 
-  
-  const [isToolbarOpen, setIsToolbarOpen] = React.useState(true);
-  const [isTheaterMode, setIsTheaterMode] = React.useState(false);
+  const getCursorStyle = () => {
+    if (!isHost) return 'pointer-events-none';
+    if (activeTool === 'pan') return 'cursor-default pointer-events-auto';
+    return 'cursor-crosshair pointer-events-auto';
+  };
 
   return (
-    <div className={`flex flex-col transition-all duration-400 ease-out ${isTheaterMode ? 'fixed inset-0 z-[99999] w-screen h-screen bg-black' : 'relative w-full h-full bg-[#1a1a1a] md:rounded-xl overflow-hidden shadow-2xl'}`}>
+    <div className={`flex flex-col w-full h-full transition-all duration-300 ease-out ${isTheaterMode ? 'fixed inset-0 z-[99999] bg-[#1a1a1a]' : 'relative bg-transparent overflow-hidden'}`}>
+      
+      {/* Кнопка переключения режима кинотеатра (улучшена видимость) */}
+      <button 
+        onClick={() => setIsTheaterMode(!isTheaterMode)} 
+        className="absolute bottom-4 right-4 md:bottom-6 md:right-6 z-[100000] bg-black/40 hover:bg-black/60 border border-white/20 text-white rounded-xl w-10 h-10 md:w-12 md:h-12 flex items-center justify-center backdrop-blur-md shadow-lg transition-all"
+      >
+        {isTheaterMode ? <CompressIcon /> : <ExpandIcon />}
+      </button>
 
-      {/* Премиальная кнопка закрытия */}
-      {isTheaterMode && (
-        <button onClick={() => setIsTheaterMode(false)} className="absolute top-6 right-6 z-[100000] bg-white/10 hover:bg-white/20 border border-white/20 text-white rounded-full w-10 h-10 flex items-center justify-center backdrop-blur-md shadow-lg transition-all">
-          ✕
-        </button>
-      )}
-
-      {/* Ненавязчивая подсказка для учеников */}
-      {!isTheaterMode && !isHost && (
-        <div className="absolute top-4 right-4 z-50 bg-black/40 px-3 py-1.5 rounded-lg text-white/60 text-[10px] md:text-xs backdrop-blur-md pointer-events-none border border-white/5 shadow-lg">
-          Двойной тап — на весь экран
-        </div>
-      )}
-
-      {/* Умная сворачиваемая панель управления */}
+      {/* ПРЕМИАЛЬНЫЙ ПАРЯЩИЙ DOCK */}
       {isHost && (
-        <div className="absolute top-4 left-1/2 -translate-x-1/2 z-40 flex flex-col items-center">
-          <button onClick={() => setIsToolbarOpen(!isToolbarOpen)} className="bg-black/60 text-white/80 hover:text-white text-[10px] md:text-xs px-4 py-1.5 rounded-full backdrop-blur-md transition-all border border-white/10 shadow-lg">
-            {isToolbarOpen ? 'Скрыть панель ▲' : 'Инструменты ▼'}
+        <div className={`absolute bottom-2 md:bottom-4 left-1/2 -translate-x-1/2 z-[100000] flex items-center gap-1 md:gap-2 bg-[#1a1a1a]/90 backdrop-blur-xl border border-white/10 p-1 md:p-1.5 rounded-2xl shadow-2xl transition-all duration-500 ease-out ${isMounted ? 'translate-y-0 opacity-100' : 'translate-y-10 opacity-0'}`}>
+          
+          <label className="cursor-pointer w-9 h-9 md:w-10 md:h-10 flex items-center justify-center text-gray-300 hover:text-white bg-white/5 hover:bg-white/10 rounded-xl transition-all" title="Загрузить PDF">
+            <UploadPdfIcon />
+            <input type="file" accept="application/pdf" className="hidden" onChange={handleFileUpload} />
+          </label>
+          
+          <div className="w-[1px] h-6 bg-white/10 mx-1"></div>
+          
+          <button disabled={currentPage <= 1} onClick={() => changePage(currentPage - 1)} className="w-9 h-9 md:w-10 md:h-10 flex items-center justify-center text-white/70 hover:text-white disabled:opacity-30 bg-white/5 hover:bg-white/10 rounded-xl transition-all">
+            <PrevIcon />
+          </button>
+          <span className="text-white font-mono text-[10px] md:text-xs px-1 min-w-[45px] text-center">
+            {currentPage} / {totalPages}
+          </span>
+          <button disabled={currentPage >= totalPages} onClick={() => changePage(currentPage + 1)} className="w-9 h-9 md:w-10 md:h-10 flex items-center justify-center text-white/70 hover:text-white disabled:opacity-30 bg-white/5 hover:bg-white/10 rounded-xl transition-all">
+            <NextIcon />
           </button>
           
-          {isToolbarOpen && (
-            <div className="flex items-center gap-2 md:gap-4 bg-black/80 backdrop-blur-md px-2 md:px-4 py-2 rounded-2xl border border-white/10 shadow-2xl mt-2 transition-all">
-              <label className="cursor-pointer bg-white/10 hover:bg-white/20 text-white text-[10px] md:text-xs font-bold px-2 py-1.5 md:px-3 rounded-lg transition-all">
-                + PDF
-                <input type="file" accept="application/pdf" className="hidden" onChange={handleFileUpload} />
-              </label>
-              <div className="flex items-center gap-1 md:gap-2 text-gray-300 font-mono text-[10px] md:text-sm">
-                <button disabled={currentPage <= 1} onClick={() => { setCurrentPage(p => p - 1); broadcast({ type: 'WB_PAGE', page: currentPage - 1 }); }} className="px-1 hover:text-white disabled:opacity-50">◀</button>
-                <span>{currentPage} / {totalPages}</span>
-                <button disabled={currentPage >= totalPages} onClick={() => { setCurrentPage(p => p + 1); broadcast({ type: 'WB_PAGE', page: currentPage + 1 }); }} className="px-1 hover:text-white disabled:opacity-50">▶</button>
-              </div>
-              <button onClick={clearPage} className="text-red-400 hover:text-red-300 text-[10px] md:text-xs font-bold px-1 md:px-2 uppercase transition-colors">Очистить</button>
-              <button onClick={saveAndUploadNotes} className="bg-red-800 hover:bg-red-700 text-white text-[10px] md:text-xs font-bold px-2 py-1.5 md:px-3 rounded-lg shadow-[0_0_10px_rgba(153,27,27,0.5)] transition-all">
-                {uploadProgress > 0 ? `${uploadProgress}%` : '💾 В LMS'}
-              </button>
-            </div>
-          )}
+          <div className="w-[1px] h-6 bg-white/10 mx-1"></div>
+          
+          <button onClick={() => setActiveTool('pan')} className={`w-9 h-9 md:w-10 md:h-10 flex items-center justify-center rounded-xl transition-all ${activeTool === 'pan' ? 'bg-blue-500/20 text-blue-400 border border-blue-500/30' : 'text-white/70 hover:bg-white/10 hover:text-white'}`}>
+            <PanIcon />
+          </button>
+          <button onClick={() => setActiveTool('pen')} className={`w-9 h-9 md:w-10 md:h-10 flex items-center justify-center rounded-xl transition-all ${activeTool === 'pen' ? 'bg-red-500/20 text-red-400 border border-red-500/30' : 'text-white/70 hover:bg-white/10 hover:text-white'}`}>
+            <PenIcon />
+          </button>
+          <button onClick={() => setActiveTool('eraser')} className={`w-9 h-9 md:w-10 md:h-10 flex items-center justify-center rounded-xl transition-all ${activeTool === 'eraser' ? 'bg-white/20 text-white border border-white/30' : 'text-white/70 hover:bg-white/10 hover:text-white'}`}>
+            <EraserIcon />
+          </button>
+          
+          <div className="w-[1px] h-6 bg-white/10 mx-1"></div>
+          
+          <button onClick={clearPage} className="w-9 h-9 md:w-10 md:h-10 flex items-center justify-center text-red-400 hover:text-red-300 bg-red-500/10 hover:bg-red-500/20 rounded-xl transition-all" title="Очистить доску">
+            <TrashIcon />
+          </button>
+          <button onClick={saveAndUploadNotes} className="w-9 h-9 md:w-10 md:h-10 flex items-center justify-center text-green-400 hover:text-green-300 bg-green-500/10 hover:bg-green-500/20 rounded-xl transition-all" title="Сохранить в LMS">
+            {uploadProgress > 0 ? <span className="text-[10px] font-bold">{uploadProgress}%</span> : <SaveIcon />}
+          </button>
         </div>
       )}
 
-      {/* Резиновый холст с отработкой двойного тапа */}
-      <div onDoubleClick={() => setIsTheaterMode(prev => !prev)} className="flex-1 w-full h-full p-0 flex items-center justify-center relative touch-none bg-black cursor-pointer">
-        <div className="relative shadow-2xl bg-white w-full h-full max-w-full max-h-full mx-auto flex-shrink-0 md:rounded-lg overflow-hidden flex items-center justify-center pointer-events-none md:pointer-events-auto">
+      {/* Резиновый холст: выход двойным кликом по фону доступен для всех в Theater Mode */}
+      <div 
+        onDoubleClick={() => { if (!isHost || isTheaterMode) setIsTheaterMode(false); }} 
+        className="flex-1 w-full h-full flex items-center justify-center relative touch-none p-2 pb-16 md:pb-20"
+      >
+        <div className="relative w-full max-w-full max-h-full aspect-video bg-white md:rounded-lg overflow-hidden shadow-2xl flex-shrink-0">
           <canvas ref={bgCanvasRef} width={VIRTUAL_W} height={VIRTUAL_H} className="absolute inset-0 w-full h-full object-contain pointer-events-none" />
           <canvas
             ref={drawCanvasRef}
@@ -353,7 +437,7 @@ export default function AlveriumWhiteboard({ isHost }: { isHost: boolean }) {
             onPointerMove={onPointerMove}
             onPointerUp={onPointerUp}
             onPointerOut={onPointerUp}
-            className={`absolute inset-0 w-full h-full object-contain ${isHost ? 'cursor-crosshair pointer-events-auto' : 'pointer-events-none'}`}
+            className={`absolute inset-0 w-full h-full object-contain ${getCursorStyle()}`}
             style={{ touchAction: 'none' }}
           />
         </div>
