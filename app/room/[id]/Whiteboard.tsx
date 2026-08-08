@@ -27,15 +27,14 @@ const SaveIcon = () => (<svg viewBox="0 0 24 24" fill="none" stroke="currentColo
 
 export default function AlveriumWhiteboard({ isHost }: { isHost: boolean }) {
   const room = useRoomContext();
-  const containerRef = useRef<HTMLDivElement>(null);
   const drawCanvasRef = useRef<HTMLCanvasElement>(null);
   const bgCanvasRef = useRef<HTMLCanvasElement>(null);
+  const zoomContainerRef = useRef<HTMLDivElement>(null);
   
-  const VIRTUAL_W = 1920;
-  const VIRTUAL_H = 1080;
+  const [boardRatio, setBoardRatio] = useState<number>(16/9); 
+  const VIRTUAL_W = 2560; 
+  const VIRTUAL_H = VIRTUAL_W / boardRatio; 
   const ROOM_KEY = `alverium_wb_${room.name}`;
-  const ROOM_KEY_PDF = `alverium_wb_pdf_${room.name}`;
-  const ROOM_KEY_PAGE = `alverium_wb_page_${room.name}`;
 
   const [currentPage, setCurrentPage] = useState(1);
   const [totalPages, setTotalPages] = useState(1);
@@ -47,6 +46,11 @@ export default function AlveriumWhiteboard({ isHost }: { isHost: boolean }) {
   const [isTheaterMode, setIsTheaterMode] = useState(false);
   const [isMounted, setIsMounted] = useState(false);
 
+  const [scale, setScale] = useState(1);
+  const [pan, setPan] = useState({ x: 0, y: 0 });
+  const [isPanning, setIsPanning] = useState(false);
+  const lastPanPoint = useRef({ x: 0, y: 0 });
+
   const linesMap = useRef<Record<number, Line[]>>({});
   const currentLine = useRef<Line | null>(null);
 
@@ -54,55 +58,64 @@ export default function AlveriumWhiteboard({ isHost }: { isHost: boolean }) {
   const pdfBytesRef = useRef<ArrayBuffer | null>(null);
   const currentPdfUrlRef = useRef<string | null>(null);
 
-  // Инициализация и восстановление состояния (Линии + PDF)
   useEffect(() => {
     setIsMounted(true);
-    
-    // Восстанавливаем линии
-    const savedLines = localStorage.getItem(ROOM_KEY);
+    const savedLines = sessionStorage.getItem(ROOM_KEY);
     if (savedLines) {
       try { linesMap.current = JSON.parse(savedLines); } catch(e) {}
     }
+  }, [ROOM_KEY]);
 
-    // Восстанавливаем PDF, если доску случайно закрыли/открыли
-    const savedPdfUrl = localStorage.getItem(ROOM_KEY_PDF);
-    const savedPage = localStorage.getItem(ROOM_KEY_PAGE);
-    
-    if (savedPage) setCurrentPage(Number(savedPage));
+  const saveToLocal = () => sessionStorage.setItem(ROOM_KEY, JSON.stringify(linesMap.current));
 
-    if (savedPdfUrl) {
-      currentPdfUrlRef.current = savedPdfUrl;
-      fetch(savedPdfUrl)
-        .then(res => res.arrayBuffer())
-        .then(arrayBuffer => {
-          pdfBytesRef.current = arrayBuffer.slice(0);
-          return pdfjsLib.getDocument({ data: arrayBuffer }).promise;
-        })
-        .then(pdf => {
-          pdfDocRef.current = pdf;
-          setTotalPages(pdf.numPages);
-          setRenderTrigger(prev => prev + 1);
-        })
-        .catch(console.error);
+  useEffect(() => {
+    if (isTheaterMode) {
+      window.dispatchEvent(new Event('theater_mode_on'));
     }
-  }, [ROOM_KEY, ROOM_KEY_PDF, ROOM_KEY_PAGE]);
+  }, [isTheaterMode]);
 
-  const saveToLocal = () => {
-    localStorage.setItem(ROOM_KEY, JSON.stringify(linesMap.current));
-  };
+  useEffect(() => {
+    const el = zoomContainerRef.current;
+    if (!el) return;
 
-  // Слушатель клавиатуры: Перелистывание слайдов + выход по ESC
+    const handleWheel = (e: WheelEvent) => {
+      e.preventDefault();
+      if (e.ctrlKey || e.metaKey) {
+        const zoomFactor = -e.deltaY * 0.008;
+        setScale(s => {
+          const newScale = Math.min(Math.max(1, s + zoomFactor), 8);
+          if (newScale === 1) {
+            setPan({ x: 0, y: 0 });
+            return 1;
+          }
+          const rect = el.getBoundingClientRect();
+          const cx = e.clientX - rect.left;
+          const cy = e.clientY - rect.top;
+          
+          setPan(p => ({
+            x: cx - (cx - p.x) * (newScale / s),
+            y: cy - (cy - p.y) * (newScale / s)
+          }));
+          return newScale;
+        });
+      } else {
+        setPan(p => {
+          if (scale === 1) return { x: 0, y: 0 };
+          return { x: p.x - e.deltaX, y: p.y - e.deltaY };
+        });
+      }
+    };
+
+    el.addEventListener('wheel', handleWheel, { passive: false });
+    return () => el.removeEventListener('wheel', handleWheel);
+  }, [scale]);
+
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') {
-        setIsTheaterMode(false);
-      }
+      if (e.key === 'Escape') setIsTheaterMode(false);
       if (!isHost) return;
-      if (e.key === 'ArrowRight' && currentPage < totalPages) {
-        changePage(currentPage + 1);
-      } else if (e.key === 'ArrowLeft' && currentPage > 1) {
-        changePage(currentPage - 1);
-      }
+      if (e.key === 'ArrowRight' && currentPage < totalPages) changePage(currentPage + 1);
+      else if (e.key === 'ArrowLeft' && currentPage > 1) changePage(currentPage - 1);
     };
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
@@ -110,25 +123,21 @@ export default function AlveriumWhiteboard({ isHost }: { isHost: boolean }) {
 
   const changePage = (newPage: number) => {
     setCurrentPage(newPage);
-    localStorage.setItem(ROOM_KEY_PAGE, newPage.toString());
     broadcast({ type: 'WB_PAGE', page: newPage });
   };
 
-  // Синхронизация опоздавших
   useEffect(() => {
     const handleParticipantConnected = () => {
       if (isHost) {
         setTimeout(() => {
-          broadcast({ type: 'WB_PAGE', page: currentPage });
-          if (currentPdfUrlRef.current) {
-            broadcast({ type: 'WB_PDF_URL', url: currentPdfUrlRef.current });
-          }
+          broadcast({ type: 'WB_PAGE', page: currentPage, ratio: boardRatio });
+          if (currentPdfUrlRef.current) broadcast({ type: 'WB_PDF_URL', url: currentPdfUrlRef.current });
         }, 2000);
       }
     };
     room.on(RoomEvent.ParticipantConnected, handleParticipantConnected);
     return () => { room.off(RoomEvent.ParticipantConnected, handleParticipantConnected); };
-  }, [isHost, currentPage, room]);
+  }, [isHost, currentPage, boardRatio, room]);
 
   useEffect(() => {
     const handleData = async (payload: Uint8Array) => {
@@ -141,6 +150,7 @@ export default function AlveriumWhiteboard({ isHost }: { isHost: boolean }) {
           if (msg.page === currentPage) drawAllLines(msg.page);
         } else if (msg.type === 'WB_PAGE') {
           setCurrentPage(msg.page);
+          if (msg.ratio) setBoardRatio(msg.ratio); 
         } else if (msg.type === 'WB_CLEAR') {
           linesMap.current[msg.page] = [];
           saveToLocal();
@@ -166,7 +176,7 @@ export default function AlveriumWhiteboard({ isHost }: { isHost: boolean }) {
   useEffect(() => {
     if (pdfDocRef.current) renderPdfPage(currentPage);
     drawAllLines(currentPage);
-  }, [currentPage, renderTrigger]); 
+  }, [currentPage, renderTrigger, boardRatio]); 
 
   const renderPdfPage = async (pageNum: number) => {
     if (!pdfDocRef.current || !bgCanvasRef.current) return;
@@ -197,10 +207,21 @@ export default function AlveriumWhiteboard({ isHost }: { isHost: boolean }) {
       const loadingTask = pdfjsLib.getDocument({ data: arrayBuffer });
       const pdf = await loadingTask.promise;
       pdfDocRef.current = pdf;
+      
+      const firstPage = await pdf.getPage(1);
+      const vp = firstPage.getViewport({ scale: 1 });
+      const newRatio = vp.width / vp.height;
+      setBoardRatio(newRatio);
+      
       setTotalPages(pdf.numPages);
       setCurrentPage(1);
       setRenderTrigger(prev => prev + 1);
-      broadcast({ type: 'WB_PAGE', page: 1 });
+      
+      linesMap.current = {};
+      saveToLocal();
+      setScale(1); setPan({x:0, y:0}); 
+      
+      broadcast({ type: 'WB_PAGE', page: 1, ratio: newRatio });
 
       const fd = new FormData();
       fd.append('file', file);
@@ -209,12 +230,9 @@ export default function AlveriumWhiteboard({ isHost }: { isHost: boolean }) {
         .then(data => {
           if (data.url) {
             currentPdfUrlRef.current = data.url;
-            localStorage.setItem(ROOM_KEY_PDF, data.url);
-            localStorage.setItem(ROOM_KEY_PAGE, '1');
             broadcast({ type: 'WB_PDF_URL', url: data.url });
           }
         }).catch(console.error);
-
     } catch (err) {
         alert("Ошибка чтения PDF: " + err);
     }
@@ -225,29 +243,59 @@ export default function AlveriumWhiteboard({ isHost }: { isHost: boolean }) {
     const rect = drawCanvasRef.current.getBoundingClientRect();
     const scaleX = VIRTUAL_W / rect.width;
     const scaleY = VIRTUAL_H / rect.height;
-    return { x: (e.clientX - rect.left) * scaleX, y: (e.clientY - rect.top) * scaleY };
+    return { 
+      x: (e.clientX - rect.left) * scaleX, 
+      y: (e.clientY - rect.top) * scaleY 
+    };
   };
 
   const onPointerDown = (e: React.PointerEvent) => {
-    if (!isHost || activeTool === 'pan') return;
+    e.stopPropagation();
+    if (!isHost) return;
+    
+    if (activeTool === 'pan') {
+      setIsPanning(true);
+      lastPanPoint.current = { x: e.clientX, y: e.clientY };
+      return;
+    }
+
     setIsDrawing(true);
     const coords = getCoords(e);
     currentLine.current = { 
       points: [coords], 
       color: activeTool === 'eraser' ? '#ffffff' : '#ef4444', 
-      width: activeTool === 'eraser' ? 24 : 4,
+      width: activeTool === 'eraser' ? 32 : 5, 
       mode: activeTool === 'eraser' ? 'erase' : 'draw'
     };
   };
 
   const onPointerMove = (e: React.PointerEvent) => {
-    if (!isDrawing || !currentLine.current || !isHost) return;
+    if (!isHost) return;
+
+    if (activeTool === 'pan' && isPanning) {
+      const dx = e.clientX - lastPanPoint.current.x;
+      const dy = e.clientY - lastPanPoint.current.y;
+      setPan(p => {
+        if (scale === 1) return { x: 0, y: 0 }; 
+        return { x: p.x + dx, y: p.y + dy };
+      });
+      lastPanPoint.current = { x: e.clientX, y: e.clientY };
+      return;
+    }
+
+    if (!isDrawing || !currentLine.current) return;
     currentLine.current.points.push(getCoords(e));
     drawAllLines(currentPage, currentLine.current);
   };
 
   const onPointerUp = () => {
-    if (!isDrawing || !currentLine.current || !isHost) return;
+    if (!isHost) return;
+    if (activeTool === 'pan') {
+      setIsPanning(false);
+      return;
+    }
+    
+    if (!isDrawing || !currentLine.current) return;
     setIsDrawing(false);
     if (!linesMap.current[currentPage]) linesMap.current[currentPage] = [];
     linesMap.current[currentPage].push(currentLine.current);
@@ -280,9 +328,7 @@ export default function AlveriumWhiteboard({ isHost }: { isHost: boolean }) {
     ctx.globalCompositeOperation = 'source-over';
   };
 
-  const broadcast = (msg: any) => {
-    room.localParticipant.publishData(new TextEncoder().encode(JSON.stringify(msg)), { reliable: true });
-  };
+  const broadcast = (msg: any) => room.localParticipant.publishData(new TextEncoder().encode(JSON.stringify(msg)), { reliable: true });
 
   const clearPage = () => {
     linesMap.current[currentPage] = [];
@@ -353,66 +399,50 @@ export default function AlveriumWhiteboard({ isHost }: { isHost: boolean }) {
       }
     }
     alert(`Конспект успешно сохранен в VOD консоли как ${filename}!`);
-    
-    // Очищаем кэш после успешной выгрузки
-    localStorage.removeItem(ROOM_KEY);
-    localStorage.removeItem(ROOM_KEY_PDF);
-    localStorage.removeItem(ROOM_KEY_PAGE);
+    sessionStorage.removeItem(ROOM_KEY);
     setUploadProgress(0);
   };
 
   const getCursorStyle = () => {
     if (!isHost) return 'pointer-events-none';
-    if (activeTool === 'pan') return 'cursor-default pointer-events-auto';
+    if (activeTool === 'pan') return isPanning ? 'cursor-grabbing pointer-events-auto' : 'cursor-grab pointer-events-auto';
     return 'cursor-crosshair pointer-events-auto';
   };
 
   return (
     <div className={`flex flex-col w-full h-full transition-all duration-300 ease-out ${isTheaterMode ? 'fixed inset-0 z-[99999] bg-[#1a1a1a]' : 'relative bg-transparent overflow-hidden'}`}>
       
-      {/* Кнопка переключения режима кинотеатра (улучшена видимость) */}
-      <button 
-        onClick={() => setIsTheaterMode(!isTheaterMode)} 
-        className="absolute bottom-4 right-4 md:bottom-6 md:right-6 z-[100000] bg-black/40 hover:bg-black/60 border border-white/20 text-white rounded-xl w-10 h-10 md:w-12 md:h-12 flex items-center justify-center backdrop-blur-md shadow-lg transition-all"
-      >
+      <button onClick={() => setIsTheaterMode(!isTheaterMode)} className="absolute bottom-4 right-4 md:bottom-6 md:right-6 z-[100000] bg-black/40 hover:bg-black/60 border border-white/20 text-white rounded-xl w-10 h-10 md:w-12 md:h-12 flex items-center justify-center backdrop-blur-md shadow-lg transition-all">
         {isTheaterMode ? <CompressIcon /> : <ExpandIcon />}
       </button>
 
-      {/* ПРЕМИАЛЬНЫЙ ПАРЯЩИЙ DOCK */}
       {isHost && (
         <div className={`absolute bottom-2 md:bottom-4 left-1/2 -translate-x-1/2 z-[100000] flex items-center gap-1 md:gap-2 bg-[#1a1a1a]/90 backdrop-blur-xl border border-white/10 p-1 md:p-1.5 rounded-2xl shadow-2xl transition-all duration-500 ease-out ${isMounted ? 'translate-y-0 opacity-100' : 'translate-y-10 opacity-0'}`}>
-          
           <label className="cursor-pointer w-9 h-9 md:w-10 md:h-10 flex items-center justify-center text-gray-300 hover:text-white bg-white/5 hover:bg-white/10 rounded-xl transition-all" title="Загрузить PDF">
             <UploadPdfIcon />
             <input type="file" accept="application/pdf" className="hidden" onChange={handleFileUpload} />
           </label>
-          
           <div className="w-[1px] h-6 bg-white/10 mx-1"></div>
-          
           <button disabled={currentPage <= 1} onClick={() => changePage(currentPage - 1)} className="w-9 h-9 md:w-10 md:h-10 flex items-center justify-center text-white/70 hover:text-white disabled:opacity-30 bg-white/5 hover:bg-white/10 rounded-xl transition-all">
             <PrevIcon />
           </button>
-          <span className="text-white font-mono text-[10px] md:text-xs px-1 min-w-[45px] text-center">
-            {currentPage} / {totalPages}
-          </span>
+          <span className="text-white font-mono text-[10px] md:text-xs px-1 min-w-[45px] text-center">{currentPage} / {totalPages}</span>
           <button disabled={currentPage >= totalPages} onClick={() => changePage(currentPage + 1)} className="w-9 h-9 md:w-10 md:h-10 flex items-center justify-center text-white/70 hover:text-white disabled:opacity-30 bg-white/5 hover:bg-white/10 rounded-xl transition-all">
             <NextIcon />
           </button>
-          
           <div className="w-[1px] h-6 bg-white/10 mx-1"></div>
           
-          <button onClick={() => setActiveTool('pan')} className={`w-9 h-9 md:w-10 md:h-10 flex items-center justify-center rounded-xl transition-all ${activeTool === 'pan' ? 'bg-blue-500/20 text-blue-400 border border-blue-500/30' : 'text-white/70 hover:bg-white/10 hover:text-white'}`}>
+          <button onClick={() => setActiveTool('pan')} className={`w-9 h-9 md:w-10 md:h-10 flex items-center justify-center rounded-xl transition-all ${activeTool === 'pan' ? 'bg-blue-500/20 text-blue-400 border border-blue-500/30' : 'text-white/70 hover:bg-white/10 hover:text-white'}`} title="Перемещение холста">
             <PanIcon />
           </button>
+          
           <button onClick={() => setActiveTool('pen')} className={`w-9 h-9 md:w-10 md:h-10 flex items-center justify-center rounded-xl transition-all ${activeTool === 'pen' ? 'bg-red-500/20 text-red-400 border border-red-500/30' : 'text-white/70 hover:bg-white/10 hover:text-white'}`}>
             <PenIcon />
           </button>
           <button onClick={() => setActiveTool('eraser')} className={`w-9 h-9 md:w-10 md:h-10 flex items-center justify-center rounded-xl transition-all ${activeTool === 'eraser' ? 'bg-white/20 text-white border border-white/30' : 'text-white/70 hover:bg-white/10 hover:text-white'}`}>
             <EraserIcon />
           </button>
-          
           <div className="w-[1px] h-6 bg-white/10 mx-1"></div>
-          
           <button onClick={clearPage} className="w-9 h-9 md:w-10 md:h-10 flex items-center justify-center text-red-400 hover:text-red-300 bg-red-500/10 hover:bg-red-500/20 rounded-xl transition-all" title="Очистить доску">
             <TrashIcon />
           </button>
@@ -422,24 +452,33 @@ export default function AlveriumWhiteboard({ isHost }: { isHost: boolean }) {
         </div>
       )}
 
-      {/* Резиновый холст: выход двойным кликом по фону доступен для всех в Theater Mode */}
       <div 
+        ref={zoomContainerRef}
         onDoubleClick={() => { if (!isHost || isTheaterMode) setIsTheaterMode(false); }} 
-        className="flex-1 w-full h-full flex items-center justify-center relative touch-none p-2 pb-16 md:pb-20"
+        className="flex-1 w-full h-full flex items-center justify-center relative touch-none p-2 pb-14 md:pb-16 overflow-hidden"
       >
-        <div className="relative w-full max-w-full max-h-full aspect-video bg-white md:rounded-lg overflow-hidden shadow-2xl flex-shrink-0">
-          <canvas ref={bgCanvasRef} width={VIRTUAL_W} height={VIRTUAL_H} className="absolute inset-0 w-full h-full object-contain pointer-events-none" />
-          <canvas
-            ref={drawCanvasRef}
-            width={VIRTUAL_W}
-            height={VIRTUAL_H}
-            onPointerDown={onPointerDown}
-            onPointerMove={onPointerMove}
-            onPointerUp={onPointerUp}
-            onPointerOut={onPointerUp}
-            className={`absolute inset-0 w-full h-full object-contain ${getCursorStyle()}`}
-            style={{ touchAction: 'none' }}
-          />
+        <div 
+          className="relative flex-shrink-0 origin-top-left"
+          style={{ 
+            width: '100%', height: '100%', 
+            display: 'flex', alignItems: 'center', justifyContent: 'center',
+            transform: `translate(${pan.x}px, ${pan.y}px) scale(${scale})`,
+          }}
+        >
+          <div style={{ aspectRatio: boardRatio }} className="relative w-full max-w-full max-h-full bg-white md:rounded-lg shadow-2xl">
+            <canvas ref={bgCanvasRef} width={VIRTUAL_W} height={VIRTUAL_H} className="absolute inset-0 w-full h-full block pointer-events-none" />
+            <canvas
+              ref={drawCanvasRef}
+              width={VIRTUAL_W}
+              height={VIRTUAL_H}
+              onPointerDown={onPointerDown}
+              onPointerMove={onPointerMove}
+              onPointerUp={onPointerUp}
+              onPointerOut={onPointerUp}
+              className={`absolute inset-0 w-full h-full block ${getCursorStyle()}`}
+              style={{ touchAction: 'none' }}
+            />
+          </div>
         </div>
       </div>
     </div>

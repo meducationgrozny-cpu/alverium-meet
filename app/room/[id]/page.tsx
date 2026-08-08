@@ -23,19 +23,15 @@ function parseJwtAdmin(token: string | null) {
 }
 
 function isEgressRecorder(token: string | null) {
-  if (!token) return true; // На всякий случай пускаем
+  if (!token) return true;
   try {
     const payload = JSON.parse(decodeURIComponent(atob(token.split('.')[1].replace(/-/g, '+').replace(/_/g, '/')).split('').map(c => '%' + ('00' + c.charCodeAt(0).toString(16)).slice(-2)).join('')));
-    // Ищем признаки бота-рекордера (hidden, recorder или имя EG_...)
     return payload?.video?.hidden === true || 
            payload?.video?.recorder === true || 
            (payload?.name && payload.name.startsWith('EG_'));
   } catch (e) { return true; }
 }
 
-// ==========================================
-// ИКОНКИ
-// ==========================================
 const SettingsIcon = () => (<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" className="w-5 h-5"><path strokeLinecap="round" strokeLinejoin="round" d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z" /><path strokeLinecap="round" strokeLinejoin="round" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" /></svg>);
 const RecordIcon = () => (<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" className="w-5 h-5 group-hover:stroke-red-500"><circle cx="12" cy="12" r="10" /><circle cx="12" cy="12" r="4" fill="currentColor" className="text-current" /></svg>);
 const PenIcon = () => (<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" className="w-5 h-5"><path strokeLinecap="round" strokeLinejoin="round" d="M16.862 4.487l1.687-1.688a1.875 1.875 0 112.652 2.652L6.832 19.82a4.5 4.5 0 01-1.89 1.12l-2.827.942a.375.375 0 01-.475-.475l.942-2.827a4.5 4.5 0 011.12-1.89l13.13-13.132z" /></svg>);
@@ -140,7 +136,7 @@ function DraggableCameras({ tracks }: { tracks: any[] }) {
     >
       {tracks.map(track => (
         <div key={track.publication?.trackSid || track.participant.identity} className={`w-full aspect-video bg-black rounded-xl border ${isDragging ? 'border-red-500' : 'border-white/20'} shadow-[0_10px_30px_rgba(0,0,0,0.8)] overflow-hidden transition-colors`}>
-          <VideoTrack trackRef={track} className="w-full h-full object-cover pointer-events-none" />
+          <VideoTrack trackRef={track} className={`w-full h-full object-cover pointer-events-none ${track.participant.isLocal ? '-scale-x-100' : ''}`} />
         </div>
       ))}
     </div>
@@ -233,17 +229,32 @@ function AlveriumStage() {
   const room = useRoomContext();
   const cameraTracks = useTracks([Track.Source.Camera], { onlySubscribed: false });
 
-  // === ЖЕЛЕЗОБЕТОННЫЙ СТАРТ EGRESS ===
+  // ГЛОБАЛЬНЫЙ СЛУШАТЕЛЬ ДЛЯ СКРЫТИЯ ЧАТА ПРИ THEATER MODE
+  useEffect(() => {
+    const handleTheaterOn = () => setIsSidebarOpen(false);
+    window.addEventListener('theater_mode_on', handleTheaterOn);
+    return () => window.removeEventListener('theater_mode_on', handleTheaterOn);
+  }, []);
+
+  // БЕЗОПАСНАЯ ОСТАНОВКА ЗАПИСИ ПРИ ЗАКРЫТИИ ВКЛАДКИ
+  useEffect(() => {
+    const handleUnload = () => {
+      if (isHost && isRecording && egressId) {
+        const blob = new Blob([JSON.stringify({ egressId })], { type: 'application/json' });
+        navigator.sendBeacon('/api/stop-record', blob);
+      }
+    };
+    window.addEventListener('beforeunload', handleUnload);
+    return () => window.removeEventListener('beforeunload', handleUnload);
+  }, [isHost, isRecording, egressId]);
+
   useEffect(() => { 
     setIsHost(parseJwtAdmin(token)); 
-    
-    // Всегда шлем сигнал старта. Нативные браузеры просто проигнорируют это, а бот поймает!
     setTimeout(() => {
       try { EgressHelper.startRecording(); } catch (e) {}
-      console.log("START_RECORDING"); // Прямой нативный вывод для Chrome бота
-    }, 4000); // Ждем 4 секунды, чтобы доска точно прогрузилась
+      console.log("START_RECORDING"); 
+    }, 4000); 
     
-    // Открываем доску, если это бот
     if (isEgressRecorder(token)) {
       setIsWhiteboardOpen(true);
     }
@@ -297,44 +308,45 @@ function AlveriumStage() {
     if (!isRecording) {
       try {
         showToast("Запуск записи на сервере...");
-        const res = await fetch('/api/start-record', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ roomName: room.name })
-        });
-        
+        const res = await fetch('/api/start-record', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ roomName: room.name }) });
         const data = await res.json();
         if (data.success) {
-          setEgressId(data.egressId);
-          setIsRecording(true);
-          showToast("🔴 Запись урока началась!");
-        } else {
-          showToast("Ошибка запуска: " + data.error);
-        }
-      } catch (err) {
-        console.error('Ошибка при запуске записи:', err);
-        showToast("Ошибка соединения с сервером записи");
-      }
+          setEgressId(data.egressId); setIsRecording(true); showToast("🔴 Запись урока началась!");
+        } else showToast("Ошибка запуска: " + data.error);
+      } catch (err) { showToast("Ошибка соединения с сервером записи"); }
     } else {
       try {
         showToast("Остановка записи...");
-        await fetch('/api/stop-record', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ egressId: egressId })
-        });
-        
-        setIsRecording(false);
-        setEgressId(null);
-        showToast("✅ Запись сохранена в VOD-консоль");
-      } catch (err) {
-        console.error('Ошибка при остановке записи:', err);
-        showToast("Ошибка при остановке записи");
-      }
+        await fetch('/api/stop-record', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ egressId: egressId }) });
+        setIsRecording(false); setEgressId(null); showToast("✅ Запись сохранена в VOD-консоль");
+      } catch (err) { showToast("Ошибка при остановке записи"); }
     }
   };
 
-  const speakerCameraTracks = cameraTracks.filter(track => (hostIdentity ? track.participant.identity === hostIdentity : true) && track.publication?.isMuted === false);
+  // ФИКС УЯЗВИМОСТИ: ГАРАНТИРОВАННОЕ СОХРАНЕНИЕ ПЕРЕД ВЫХОДОМ
+  const safeDisconnect = async () => {
+    if (isHost && isRecording && egressId) {
+      showToast("Сохранение записи в VOD... Ждите!");
+      try {
+        await fetch('/api/stop-record', { 
+          method: 'POST', 
+          headers: { 'Content-Type': 'application/json' }, 
+          body: JSON.stringify({ egressId: egressId }),
+          keepalive: true 
+        });
+        // Даем серверу 1.5 сек на обработку перед разрывом WebRTC
+        await new Promise(resolve => setTimeout(resolve, 1500));
+      } catch (err) {}
+    }
+    room.disconnect();
+  };
+
+  const isBot = isEgressRecorder(token);
+  const speakerCameraTracks = cameraTracks.filter(track => {
+    if (hostIdentity) return track.participant.identity === hostIdentity && track.publication?.isMuted === false;
+    if (isHost) return track.participant.isLocal && track.publication?.isMuted === false;
+    return false;
+  });
 
   return (
     <div className="flex flex-col h-[100dvh] bg-[#000000] text-white relative">
@@ -355,11 +367,15 @@ function AlveriumStage() {
       <main className="flex-1 flex overflow-hidden relative bg-[#0a0a0a]">
         <div className="flex-1 relative overflow-hidden transition-all duration-300">
           {isWhiteboardOpen ? (
-            <div className="absolute inset-0 z-0 p-0 md:p-2 flex items-center justify-center">
+            <div className="absolute inset-0 z-0 p-0 flex items-center justify-center">
               <AlveriumWhiteboard isHost={isHost} />
             </div>
           ) : (
-            <div className="absolute inset-0 p-2 md:p-4"><GridLayout tracks={cameraTracks} style={{ height: '100%' }}><ParticipantTile /></GridLayout></div>
+            <div className="absolute inset-0 p-2 md:p-4">
+              <GridLayout tracks={isBot ? speakerCameraTracks : cameraTracks} style={{ height: '100%' }}>
+                <ParticipantTile />
+              </GridLayout>
+            </div>
           )}
 
           {isWhiteboardOpen && <DraggableCameras tracks={speakerCameraTracks} />}
@@ -373,10 +389,7 @@ function AlveriumStage() {
           <button onClick={() => setIsSettingsOpen(true)} className="hidden md:flex w-12 h-12 bg-white/5 rounded-xl items-center justify-center text-gray-400 hover:text-white transition-colors"><SettingsIcon /></button>
           
           {isHost && (
-            <button 
-              onClick={handleRecordClick} 
-              className={`hidden md:flex w-12 h-12 rounded-xl items-center justify-center transition-all duration-300 ${isRecording ? 'bg-red-900/40 text-red-500 animate-pulse border border-red-500/30' : 'bg-white/5 text-gray-400 hover:text-red-400'}`}
-            >
+            <button onClick={handleRecordClick} className={`hidden md:flex w-12 h-12 rounded-xl items-center justify-center transition-all duration-300 ${isRecording ? 'bg-red-900/40 text-red-500 animate-pulse border border-red-500/30' : 'bg-white/5 text-gray-400 hover:text-red-400'}`}>
               <RecordIcon />
             </button>
           )}
@@ -394,7 +407,9 @@ function AlveriumStage() {
         </div>
         
         <div className="flex justify-end w-auto md:w-1/3">
-          <DisconnectButton className="!bg-red-800 hover:!bg-red-700 !text-white px-4 md:px-6 py-2.5 !rounded-xl text-[10px] font-bold transition-colors"><span className="hidden md:inline">Завершить</span><span className="md:hidden">Выйти</span></DisconnectButton>
+          <button onClick={safeDisconnect} className="bg-red-800 hover:bg-red-700 text-white px-4 md:px-6 py-2.5 rounded-xl text-[10px] font-bold transition-colors flex items-center">
+            <span className="hidden md:inline">Завершить</span><span className="md:hidden">Выйти</span>
+          </button>
         </div>
       </footer>
     </div>
